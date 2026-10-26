@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BSC Agent 行情终端</title>
+<link rel="icon" type="image/png" sizes="32x32" href="logo-32.png?v=gold-b-1" />
+<link rel="icon" type="image/png" sizes="96x96" href="logo-96.png?v=gold-b-1" />
+<link rel="apple-touch-icon" href="logo.png?v=gold-b-1" />
+<link rel="stylesheet" href="style.css?v=1792949157" />
+<link rel="stylesheet" href="agent.css?v=14" />
+</head>
+<body class="fav-on">
+<header class="topbar">
+  <div class="brand" id="brand" role="link" tabindex="0" title="进入战壕" aria-label="BSC Agent 行情终端首页">
+    <img class="brand-logo" src="logo.png?v=gold-b-1" width="30" height="30" alt="BSC Agent" />
+    <div><div class="brand-t">BSC Agent</div><div class="brand-sub">行情终端</div></div>
+  </div>
+  <div class="viewsw" id="viewSw"><button data-view="trade" class="active">行情</button><button data-view="pulse">战壕</button><button data-view="hold">持仓</button></div>
+  <label class="search">
+    <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2"/></svg>
+    <input id="search" placeholder="搜索代币或粘贴合约地址" aria-label="搜索代币或合约地址" autocomplete="off" />
+    <kbd>/</kbd>
+    <div id="searchResults" class="search-results hidden"></div>
+  </label>
+  <div class="header-wallet">
+  <button class="pill as-pill hidden" id="autoSendPill" data-autosend title="自动转出设置"></button>
+  <div class="authpill hidden" id="authPill"><i></i><span></span></div>
+  <button class="pill fav-tg" id="favToggle" title="收藏栏（显示 / 隐藏）" aria-label="显示或隐藏收藏栏"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z"/></svg></button>
+
+  <div class="wallet-sel" id="walletSel">
+    <i class="wav" id="wsAvatar"></i><div class="wallet-identity"><span class="wtag" id="wsLabel">钱包</span><span class="handle" id="wsHandle"></span></div>
+    <div class="wallet-balance"><span class="mono" id="wsAddr">连接中</span><span class="mono muted" id="wsBal"></span></div><span class="caret">▾</span>
+    <div class="wallet-menu hidden" id="walletMenu"></div>
+  </div>
+  </div>
+</header>
+<div class="favbar" id="favBar"><div class="fav-groups" id="favGroups"></div><div class="fav-strip" id="favStrip"></div></div>
+
+<main class="layout">
+  <div class="splitter" id="splitter" title="拖动调整左栏宽度，双击恢复默认"></div>
+  <!-- 左：新币流 -->
+  <aside class="panel left">
+    <section class="market-tools" aria-label="行情与快捷买入设置">
+      <span class="hidden" id="agentCnt">0</span>
+      <div class="market-tools-head">
+    <div class="seg plat" id="platTabs">
+      <button data-p="all" class="active"><span>All</span> <i class="badge-n" data-n="all"></i></button>
+      <button data-p="flap"><span>Flap</span> <i class="badge-n" data-n="flap"></i></button>
+      <button data-p="four"><span>Four</span> <i class="badge-n" data-n="four"></i></button>
+      <button data-p="gang">Gang <i class="badge-n" data-n="gang"></i></button>
+    </div>
+      <div class="lctrl">
+        <button class="ibtn" id="btnBell" title="新币通知：页面在后台时，当前平台出新币弹系统通知"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></button>
+        <button class="ibtn" id="btnSound" title="声音：出新币「叮咚」、成交提示音（战壕各列的小喇叭单独控制）"><svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path class="w" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/><path class="x" d="M16 9.5l5 5m0-5l-5 5"/></svg></button>
+      </div>
+      </div>
+      <div class="market-tools-summary"><span id="marketQuickSummary"></span><button id="marketSettingsToggle" type="button" aria-expanded="false" aria-controls="marketSettings">展开设置</button></div>
+      <div id="marketSettings" class="hidden">
+    <div class="market-buybar" id="marketBuybar">
+      <b class="market-buy-title">快捷买入</b><div class="seg xs" id="marketBuyMode"><button data-mbmode="pct" class="active">按总量 %</button><button data-mbmode="bnb">按 BNB</button></div>
+      <label class="quick-pct"><span>比例</span><input id="quickPct" type="number" min="0.01" max="100" step="0.1" value="1" aria-label="快捷买入代币总量比例"/><span>%</span></label>
+      <label class="quick-amt"><span>金额</span><input id="marketBuyBnb" type="number" min="0" step="0.001" placeholder="0.01" aria-label="快捷买入金额 BNB"/><span>BNB</span></label>
+      <label class="quick-wallet"><span>钱包</span><select id="quickWallet" aria-label="快捷买入钱包"><option value="">当前钱包</option></select></label>
+      <span class="market-buy-hint">先选金额方式，再点卡片右侧买入</span>
+    </div>
+    <section class="market-options"><h3>筛选与行情状态</h3><div class="market-options-body">
+    <div class="chips" id="chips">
+      <button data-c="bnb">BNB 池</button><button data-c="other">其他计价</button><button data-c="traded">有成交</button><button data-c="h1">1小时内</button>
+    </div>
+<div class="agent-status" id="agentStatus"></div></div></section>
+      </div>
+    </section>
+    <div class="tabs" id="listTabs">
+      <button data-t="curve" class="active">内盘中</button><button data-t="soon">即将发射</button><button data-t="dex">已迁移</button><button data-t="mine">我的</button>
+    </div>
+    <div class="market-columns"><span>代币 / 平台</span><span>价格 / 1h 涨幅</span></div>
+    <div class="tlist" id="tokenList"></div>
+  </aside>
+
+  <!-- 中：行情 -->
+  <section class="center">
+    <div class="panel thead" id="tokenHead"></div>
+    <div class="chartrow">
+    <div class="panel chartbox">
+      <div class="ctool">
+        <div class="seg sm" id="intervals">
+          <button data-i="1" class="active">1s</button><button data-i="5">5s</button><button data-i="15">15s</button><button data-i="60">1m</button><button data-i="300">5m</button><button data-i="900">15m</button><button data-i="3600">1h</button>
+        </div>
+        <div class="seg sm" id="metric"><button data-m="mcap" class="active">市值</button><button data-m="price">份额价格</button></div>
+        <button class="activity-toggle" id="toggleActivity" aria-expanded="false" aria-controls="actBox">活动</button><div class="ohlc mono" id="ohlc"></div>
+      </div>
+      <div class="chart-wrap"><div id="chartStatus" class="chart-status" role="status" aria-live="polite"></div><button class="to-latest hidden" id="toLatest">回到最新 ›</button></div>
+    </div>
+    <div class="panel actbox" id="actBox"><div class="act-h"><b>活动</b><span class="muted" id="actCnt"></span></div>
+      <div class="act-th"><span>总额</span><span>市值</span><span>交易者</span><button id="actSort" title="点击切换时间排序">时间 ↓</button></div>
+      <div class="act-b" id="actBody"></div></div>
+    </div>
+    <div class="vsplit" id="vsplit" title="上下拖动调整 K 线高度"></div>
+    <div class="panel bottom">
+      <div class="tabs btabs" id="bottomTabs">
+        <button data-b="trades" class="active">实时成交</button><button data-b="flow">全市场成交流</button><button data-b="pos">我的持仓</button>
+        <button data-b="orders">终端订单</button><button data-b="fills">成交记录</button><button data-b="assets">钱包资产</button><button data-b="logs">事件日志</button>
+        <span class="spacer"></span><span class="muted" id="bottomCnt"></span>
+      </div>
+      <div class="btable" id="bottomBody"></div>
+    </div>
+  </section>
+
+  <!-- 右：下单 -->
+  <aside class="panel right" id="rightPanel">
+    <div class="quote-heading"><h2>交易</h2><span id="quoteMode">只读报价</span></div>
+    <div class="seg bs" id="sideTabs"><button data-s="buy" class="active">买入</button><button data-s="sell">卖出</button></div>
+    <div class="route" id="route">选择代币后显示报价路线</div>
+    <div class="row-lbl">
+      <b id="amtLabel">买入金额</b>
+      <div class="seg xs" id="amtMode"><button data-a="bnb" class="active">BNB 金额</button><button data-a="pct">代币总量 %</button></div>
+      <span class="spacer"></span><span class="muted">可用 <span class="mono" id="avail">0</span></span>
+    </div>
+    <label class="amt"><input id="amount" aria-label="报价金额" class="mono" placeholder="0.00" inputmode="decimal" /><b id="amtUnit">BNB</b></label>
+    <div class="presets" id="presets"></div>
+    <div class="row-lbl"><b>允许价格偏差</b><span class="spacer"></span><span class="muted mono" id="slipShow">35%</span></div>
+    <p class="control-help">成交价格最多允许偏离报价的比例；越高，成交价可能越不利。</p>
+    <div class="seg slip" id="slip"><button data-v="3">3%</button><button data-v="5">5%</button><button data-v="10">10%</button><button data-v="20">20%</button><button data-v="35" class="active">35%</button><button data-v="custom">自定义</button></div>
+    <div class="quote" id="quote">
+      <div><span>预计获得</span><b>—</b></div><div><span>最少获得</span><b>—</b></div><div><span>手续费</span><b>—</b></div>
+    </div>
+    <div class="row-lbl"><b id="wLabel">执行钱包</b><span class="spacer"></span><span class="muted" id="wHint">当前钱包</span></div>
+    <div class="wchips" id="wchips"></div>
+    <button class="big-btn" id="submit">预览报价</button>
+    <p class="quote-safety" id="quoteSafety">仅预览，不发送交易</p>
+    <section class="advanced-settings"><h3>快捷操作</h3><div class="advanced-body">
+    <div class="qtrade"><button id="qBuy2" class="qt-b">⚡ 快捷买入 1% <kbd>空格+W</kbd></button><button id="qClear" class="qt-s">清仓 <kbd>空格+F</kbd></button></div>
+    <label class="tgl"><input type="checkbox" id="fastMode" /><i></i><span>点击后直接执行<small>跳过确认弹窗；只读报价时仍不会上链</small></span></label>
+    <label class="tgl"><input type="checkbox" id="autoClaim" /><i></i><span>发射后自动领取<small>把已迁移市场的份额领取为代币</small></span></label>
+    <label class="tgl" title="卖出 BNCB / GANG / 币股计价的代币后，把这次卖出到账的报价币自动换成 BNB（只换这一笔到账的数量，不动你原有的报价币）"><input type="checkbox" id="sellToBnb" /><i></i>卖出后自动换回 BNB</label>
+    <label class="tgl" title="需要授权时授一个较大的固定额度（报价币约 2 倍单笔上限、卖出的代币约全部余额，不是无限额），以后的交易就不用再单独授权、快约 4 秒。关掉 = 每次只授权本次数量"><input type="checkbox" id="preApproveCap" /><i></i>记住授权额度（减少重复授权）</label>
+    <section class="approval-panel"><h3>授权管理</h3><p class="control-help">授权允许指定合约使用你的代币。这里只查询本程序记录过的授权，不代表钱包的全部授权。</p><button class="settings-row" id="openApprovals"><span>读取 / 刷新授权</span><span class="muted">查看额度</span></button><div id="approvalBody" role="status">尚未读取授权记录。</div></section>
+    <button class="settings-row" id="autoSendLink" data-autosend><span>自动转出设置</span><span class="muted" id="autoSendSum">—</span></button>
+    <button class="settings-row" data-bmgr><span>已屏蔽的代币 / 开发者</span><span class="muted">查看 · 取消屏蔽</span></button>
+
+    </div></section>
+    <section class="strategy-inline" id="strategyInline"><h3>完整策略与风控</h3><div id="settingsBody"></div></section>
+    <div class="card" id="myPos"></div>
+    <details class="token-details"><summary>代币与合约信息</summary>
+    <div class="card" id="tokenInfo"></div></details>
+  </aside>
+</main>
+<section class="hold hidden" id="hold"><div class="hold-in">
+  <div class="hold-h">
+    <div class="hold-tot" id="holdTot"></div>
+    <div class="hold-f"><span class="plg" id="holdPlats"><i class="pf" data-hp="flap">Flap</i><i class="p4" data-hp="four">Four</i><i class="pg" data-hp="gang">Gang</i></span>
+      <label class="tgl"><input type="checkbox" id="holdDust" checked/><i></i>隐藏小额/已清仓</label><button class="qb" id="holdRefresh">刷新</button></div>
+  </div>
+  <div class="hold-sw" id="holdSwap"></div>
+  <div class="hold-q" id="holdQuote"></div>
+  <div class="hold-b" id="holdBody"></div>
+</div></section>
+<section class="pulse trench hidden" id="pulse">
+  <div class="tcol" id="tc-new"><div class="tchw" id="tch-new"></div><div class="tc-pop-w hidden" id="tcf-new"></div><div class="tcb" id="tcb-new"></div></div>
+  <div class="tcol" id="tc-soon"><div class="tchw" id="tch-soon"></div><div class="tc-pop-w hidden" id="tcf-soon"></div><div class="tcb" id="tcb-soon"></div></div>
+  <div class="tcol" id="tc-dex"><div class="tchw" id="tch-dex"></div><div class="tc-pop-w hidden" id="tcf-dex"></div><div class="tcb" id="tcb-dex"></div></div>
+</section>
+
+<footer class="statusbar"><span class="chain-status"><i class="dot g"></i>BSC 主网</span>  <div class="pill"><i class="dot y"></i><span class="muted">WSS</span><b id="wssName">…</b><span class="g mono" id="wssMs"></span></div>  <div class="pill"><i class="dot g"></i><span class="muted">RPC</span><b id="rpcName">…</b><span class="g mono" id="rpcMs"></span></div>  <div class="pill mono muted" id="blockNo">#—</div>  <div class="pill mono muted" id="bnbPx">BNB —</div>  <div class="pill" id="modeBadge">连接中…</div><span class="spacer"></span><span class="status-version">BSC Agent 行情终端</span></footer>
+
+<!-- 下单确认 -->
+<!-- 币安钱包未登录时的锁定弹窗：不能用 Esc 或点背景关闭，登录成功后自动消失 -->
+<div class="lockmodal authgate hidden" id="loginModal" role="dialog" aria-modal="true">
+  <div class="lockbox">
+    <img class="ag-logo" src="logo.png?v=gold-b-1" width="64" height="64" alt="BSC Agent" />
+    <h3>请先登录币安 Agentic Wallet</h3>
+    <p class="muted" id="loginLead">检测到币安钱包<b class="r">未登录</b>。登录前所有功能都不能使用。</p>
+    <ol class="ag-steps" id="loginBody"></ol>
+    <div class="lockbtns"><button class="big-btn" id="loginRecheck">我已登录，重新检测</button></div>
+    <p class="muted ag-note" id="loginNote"></p>
+  </div>
+</div>
+<div class="modal hidden" id="confirmModal">
+  <div class="sheet small">
+    <div class="sheet-h"><b>确认交易</b><button class="x" data-close>×</button></div>
+    <div class="sheet-b" id="confirmBody"></div>
+  </div>
+</div>
+
+<div class="modal hidden" id="blockModal">
+  <div class="sheet small">
+    <div class="sheet-h"><b id="blockTitle">已屏蔽</b><button class="x" data-close>×</button></div>
+    <div class="sheet-b" id="blockBody"></div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+<script src="vendor/lightweight-charts.standalone.production.js?v=1792914154.2.0"></script>
+<script type="module" src="app.js?v=bsc-agent-14"></script>
+</body>
+</html>
