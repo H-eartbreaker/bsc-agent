@@ -19,7 +19,7 @@ import { Favorites } from './engine/favorites.js';
 import { MODE, LIVE_TRADE } from './engine/live/config.js';
 import { isLocalRequest, localBoundary, rejectUnsafeBody, isPublicImageUrl, safeLookup, assertPublicHost } from './engine/security.js';
 import { loadApiToken, hasApiAccess, apiAuth, tokenMatches } from './engine/apiAuth.js';
-import { proxyAgentFor, pfetch } from './engine/netProxy.js';
+import { proxyAgentFor, pfetch, autoProxy, proxyState, trySetProxy } from './engine/netProxy.js';
 import { WalletFleet, parsePeers } from './engine/live/walletFleet.js';
 import { BAW_DIR, WALLET_LABEL, DATA_DIR as DATA_DIR_UI } from './engine/live/config.js';
 import * as latency from './engine/live/latency.js';
@@ -197,6 +197,16 @@ app.post('/api/pause-everything', (req, res) => {
   res.json({ ok: true, paused: done });
 });
 // 系统自检：一眼看出哪里没配好（只返回是/否和说明，不含地址、余额、名字）
+// 代理：页面里手动保存过的优先；没有就自动找（先直连，不通再读系统代理、试常见端口）。每 3 分钟没通就再找一次
+const PROXY_FILE = path.join(__dirname, 'data/proxy.json');
+try { const sv = JSON.parse(fs.readFileSync(PROXY_FILE, 'utf8')); if (sv?.url && !process.env.BSC_AGENT_PROXY) process.env.BSC_AGENT_PROXY = sv.url; } catch { /* 没存过 */ }
+autoProxy().catch(() => {});
+setInterval(() => { if (proxyState().mode === 'none') autoProxy(true).catch(() => {}); }, 180_000);
+app.post('/api/proxy', async (req, res) => {
+  const r = await trySetProxy(req.body?.url);
+  if (r.ok) { try { fs.mkdirSync(path.dirname(PROXY_FILE), { recursive: true }); fs.writeFileSync(PROXY_FILE, JSON.stringify({ url: r.url })); } catch { /* 存不了也先用着 */ } }
+  res.status(r.ok ? 200 : 400).json(r);
+});
 app.get('/api/selfcheck', async (req, res) => {
   const st = trader?.status || {}, items = [];
   const add = (name, ok, tip) => items.push({ name, ok: !!ok, tip: ok ? '' : tip });
@@ -204,8 +214,10 @@ app.get('/api/selfcheck', async (req, res) => {
   add('允许真实下单', LIVE && LIVE_TRADE, '没有开真实下单：.env 里设 LIVE_TRADE=1，然后重启');
   add('币安 Agentic 钱包已登录', st.auth?.state === 'ok', '还没登录：按 README 第 2 步，在币安 App 里授权这个钱包');
   add('钱包连接正常', LIVE && st.connected !== false && !st.error, st.error ? '连接出错：' + String(st.error).slice(0, 80) : '钱包没连上，检查网络和代理');
-  let netOk = false; try { const r = await pfetch('https://api.dexscreener.com/latest/dex/search?q=bnb', { signal: AbortSignal.timeout(6000), headers: { accept: 'application/json' } }); netOk = r.ok; } catch { /* 连不上 */ }
-  add('能连上行情站（头像 / 池子 / K 线）', netOk, '连不上：国内网络请在 .env 里加一行 BSC_AGENT_PROXY=http://127.0.0.1:7897（端口换成你自己代理软件的），保存后重启');
+  const pingNet = async () => { try { const r = await pfetch('https://api.dexscreener.com/latest/dex/search?q=bnb', { signal: AbortSignal.timeout(6000), headers: { accept: 'application/json' } }); return r.ok; } catch { return false; } };
+  let netOk = await pingNet(); if (!netOk) { await autoProxy(true).catch(() => {}); netOk = await pingNet(); }
+  const ps = proxyState();
+  items.push({ key: 'net', name: '能连上行情站（头像 / 池子 / K 线）' + (netOk && ps.mode === 'proxy' ? `，已走代理 ${ps.url.replace(/^https?:\/\//, '')}` : ''), ok: netOk, tip: netOk ? '' : '没找到能用的代理。请先打开你的代理软件（Clash / V2Ray 等），再点「重新检查」；还不行就把代理软件里的 HTTP 代理地址填在下面。' });
   add('自动转出地址', !!trader?.settings?.sendTo, '没设置也能用；想自动转出，在底部「自动转出」里填你自己的地址');
   add('追踪 / 跟单模块', !!tracker, '只有实盘主后端支持追踪和跟单');
   add('狙击模块', typeof sniper !== 'undefined' && !!sniper, '只有实盘主后端支持狙击');

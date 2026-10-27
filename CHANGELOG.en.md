@@ -6,7 +6,7 @@
 
 ## 0.3.2
 - Fix: an old `.env` containing `MODE=sim` made the page show "demo account" and stopped it from working out of the box. The public version has no simulation mode and now always starts in live mode (sim is only allowed for development tests).
-- New self-check item "can reach the market data sites": avatars, pool size and charts all depend on external data sites; on networks where they are blocked the app now tells you to set `BSC_AGENT_PROXY` in `.env`. Avatar downloads also honour `BSC_AGENT_PROXY`.
+- Automatic proxy detection: no need to type a proxy port any more. On startup the app tries a direct connection first, then reads the system proxy settings and probes common proxy ports (Clash, V2Ray…). If nothing works, the self-check page has an input box: paste the HTTP proxy address from your proxy app and click Save & test — it takes effect immediately, no restart. Avatars, pool size and charts depend on this.
 
 ## 0.3.1
 - Maintenance release used to verify the GitHub new-version reminder: older versions will see the red dot on the GitHub icon and the update pop-up. No functional changes.
