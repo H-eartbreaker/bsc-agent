@@ -4,6 +4,9 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.3.1
+- Maintenance release used to verify the GitHub new-version reminder: older versions will see the red dot on the GitHub icon and the update pop-up. No functional changes.
+
 ## 0.3.0
 **Interface**
 - Redesigned trench cards: name / pool quote asset · tax · launch mode (Gang V1 / V2 / V3, fair launch, Flap, Four — each with a fixed colour) / pool size and tags / age · holders · trades / Dev · first buyer. The useless "volume" line is gone.
