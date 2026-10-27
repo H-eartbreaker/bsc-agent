@@ -212,7 +212,7 @@ app.get('/api/selfcheck', async (req, res) => {
   const add = (name, ok, tip) => items.push({ name, ok: !!ok, tip: ok ? '' : tip });
   add('实盘模式', LIVE, '没有开实盘：启动时需要 MODE=live（用 start.sh 会自动带上）');
   add('允许真实下单', LIVE && LIVE_TRADE, '没有开真实下单：.env 里设 LIVE_TRADE=1，然后重启');
-  add('币安 Agentic 钱包已登录', st.auth?.state === 'ok', '还没登录：按 README 第 2 步，在币安 App 里授权这个钱包');
+  add('币安 Agentic 钱包已登录', st.auth?.state === 'ok', '还没登录：页面中间会弹出登录窗口，点「登录币安钱包」，按提示在币安 App 里确认配对码；没弹出就点右上角「币安钱包未登录」');
   add('钱包连接正常', LIVE && st.connected !== false && !st.error, st.error ? '连接出错：' + String(st.error).slice(0, 80) : '钱包没连上，检查网络和代理');
   const pingNet = async () => { try { const r = await pfetch('https://api.dexscreener.com/latest/dex/search?q=bnb', { signal: AbortSignal.timeout(6000), headers: { accept: 'application/json' } }); return r.ok; } catch { return false; } };
   let netOk = await pingNet(); if (!netOk) { await autoProxy(true).catch(() => {}); netOk = await pingNet(); }

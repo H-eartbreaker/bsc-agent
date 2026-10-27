@@ -49,7 +49,7 @@ cd bsc-agent
 ```
 
 The first launch shows a **guide plus a self-check**. Follow it in order:
-1. **Sign in to the Binance wallet:** run `baw auth signin` in a terminal, then confirm in the Binance App. `baw wallet status` should show `CONNECTED`.
+1. **Sign in to the Binance wallet:** a sign-in window pops up in the middle of the page. Click **Sign in to Binance wallet** → open the link it gives you → check the pairing code → confirm in the **Binance App**. The page detects it automatically; no commands needed. (If the wallet tool isn't installed, the window shows the install command with a Copy button.)
 2. Open **🩺 Self-check** at the bottom-left of the footer. The first four items must show ✓.
 3. In **Tracking / gang.fun sniping**, set **how much to buy each time**, and test with a very small amount first.
 4. To stop everything: **Pause all** at the top-right.
@@ -110,7 +110,7 @@ Copy `.env.example` to `.env` and adjust as needed (`install.sh` already does th
 ## FAQ
 - **Tokens have no avatars and the pool shows "—"?** Avatars, pool size and charts come from overseas data sites. The app finds a proxy automatically (direct first, then the system proxy, then common ports). If there are still no avatars, open your proxy app, then open **🩺 Self-check** in the footer: under "can reach the market data sites" there is an input box. Paste the HTTP proxy address from your proxy app (like `http://127.0.0.1:port`; look for "HTTP proxy port" or "mixed port" in Clash / V2Ray settings) and click **Save & test**. It takes effect immediately, no restart.
 - **The top-right says "demo account" and the page looks like a demo?** You are using an old `.env`. Update to the latest version (`git pull`) and restart, or delete the `MODE=sim` line from `.env`, or run `cp .env.example .env` again.
-- **The wallet shows "not connected"?** Run `baw wallet status`. If it isn't `CONNECTED`, run `baw auth signin` again and confirm in the Binance App.
+- **The top-right says the wallet isn't signed in?** Click it, press **Sign in to Binance wallet** in the window that appears and confirm in the Binance App. You can also run `baw auth signin` in a terminal.
 - **A chart has a gap or differs from another site?** History comes from GeckoTerminal and DexScreener, whose free APIs are rate-limited. A yellow note above the chart explains why. For newly opened tokens the history is back-filled in the background, so wait a few minutes. If the network is blocked, set `BSC_AGENT_PROXY`.
 - **A buy fails?** The page explains the reason in plain language (insufficient balance, slippage too low, wallet not signed in…). You can also open the self-check.
 - **Nothing changed after updating the code?** Restart the service and hard-refresh the browser (Cmd/Ctrl+Shift+R).
