@@ -3208,7 +3208,7 @@ async function openSelfCheck(first) {
   let r; try { r = await api('/api/selfcheck'); } catch (e) { return toast({ status: 'failed', symbol: '自检', reason: e.message }); }
   const rows = r.items.map((x) => `<div class="sc-row"><i class="${x.ok ? 'g' : 'r'}">${x.ok ? '✓' : '✗'}</i><div><b>${esc(x.name)}</b>${x.tip ? `<div class="ui-note">${esc(x.tip)}</div>` : ''}</div></div>`).join('');
   const intro = first ? '<p>欢迎！先看下面几项是否都是 ✓。真实下单只会动你自己的钱包，默认每笔都有额度上限。</p><p class="ui-note">新手顺序：① 在币安 App 授权钱包 → ② 在「追踪/狙击」里设好每次买多少 → ③ 先小额试一笔。出问题随时点顶部「全部暂停」。</p>' : '';
-  await ui.confirm({ title: first ? '开始使用 BSC Agent' : '系统自检', body: `${intro}<div class="sc-list">${rows}</div><p class="${r.ready ? 'g' : 'y'}">${r.ready ? '前 4 项都正常，可以交易。' : '前 4 项有没通过的，先处理 ✗ 的再交易。'}</p>`, confirmText: '知道了', cancelText: '关闭' });
+  await ui.confirm({ title: first ? '开始使用 BSC Agent' : '系统自检', body: `${intro}<div class="sc-list">${rows}</div><p class="${r.ready ? 'g' : 'y'}">${r.ready ? '前 5 项都正常，可以交易。' : '前 5 项有没通过的，先处理 ✗ 的再交易。'}</p>`, confirmText: '知道了', cancelText: '关闭' });
 }
 document.addEventListener('click', (e) => { if (e.target.closest('#selfCheckBtn')) { e.preventDefault(); openSelfCheck(false); } });
 setTimeout(() => { try { if (LIVE() && !localStorage.getItem('bsc-guide-done')) { localStorage.setItem('bsc-guide-done', '1'); openSelfCheck(true); } } catch {} renderPauseAll(); }, 3500);

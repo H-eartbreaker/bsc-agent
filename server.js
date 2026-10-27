@@ -19,7 +19,7 @@ import { Favorites } from './engine/favorites.js';
 import { MODE, LIVE_TRADE } from './engine/live/config.js';
 import { isLocalRequest, localBoundary, rejectUnsafeBody, isPublicImageUrl, safeLookup, assertPublicHost } from './engine/security.js';
 import { loadApiToken, hasApiAccess, apiAuth, tokenMatches } from './engine/apiAuth.js';
-import { proxyAgentFor } from './engine/netProxy.js';
+import { proxyAgentFor, pfetch } from './engine/netProxy.js';
 import { WalletFleet, parsePeers } from './engine/live/walletFleet.js';
 import { BAW_DIR, WALLET_LABEL, DATA_DIR as DATA_DIR_UI } from './engine/live/config.js';
 import * as latency from './engine/live/latency.js';
@@ -197,17 +197,19 @@ app.post('/api/pause-everything', (req, res) => {
   res.json({ ok: true, paused: done });
 });
 // 系统自检：一眼看出哪里没配好（只返回是/否和说明，不含地址、余额、名字）
-app.get('/api/selfcheck', (req, res) => {
+app.get('/api/selfcheck', async (req, res) => {
   const st = trader?.status || {}, items = [];
   const add = (name, ok, tip) => items.push({ name, ok: !!ok, tip: ok ? '' : tip });
   add('实盘模式', LIVE, '没有开实盘：启动时需要 MODE=live（用 start.sh 会自动带上）');
   add('允许真实下单', LIVE && LIVE_TRADE, '没有开真实下单：.env 里设 LIVE_TRADE=1，然后重启');
   add('币安 Agentic 钱包已登录', st.auth?.state === 'ok', '还没登录：按 README 第 2 步，在币安 App 里授权这个钱包');
   add('钱包连接正常', LIVE && st.connected !== false && !st.error, st.error ? '连接出错：' + String(st.error).slice(0, 80) : '钱包没连上，检查网络和代理');
+  let netOk = false; try { const r = await pfetch('https://api.dexscreener.com/latest/dex/search?q=bnb', { signal: AbortSignal.timeout(6000), headers: { accept: 'application/json' } }); netOk = r.ok; } catch { /* 连不上 */ }
+  add('能连上行情站（头像 / 池子 / K 线）', netOk, '连不上：国内网络请在 .env 里加一行 BSC_AGENT_PROXY=http://127.0.0.1:7897（端口换成你自己代理软件的），保存后重启');
   add('自动转出地址', !!trader?.settings?.sendTo, '没设置也能用；想自动转出，在底部「自动转出」里填你自己的地址');
   add('追踪 / 跟单模块', !!tracker, '只有实盘主后端支持追踪和跟单');
   add('狙击模块', typeof sniper !== 'undefined' && !!sniper, '只有实盘主后端支持狙击');
-  res.json({ items, ready: items.slice(0, 4).every((x) => x.ok) });
+  res.json({ items, ready: items.slice(0, 5).every((x) => x.ok) });
 });
 // 「下单耗时」页面（latency.html）：本钱包 + 其他钱包后端的每笔买卖耗时（own=1 只返回本钱包，给主后端汇总用）
 app.get('/api/latency/orders', async (req, res) => {
@@ -437,7 +439,7 @@ const imgInflight = new Map(), imgFail = new Map();
 const IPFS_GW = ['https://flap.mypinata.cloud/ipfs/', 'https://ipfs.io/ipfs/', 'https://dweb.link/ipfs/', 'https://cloudflare-ipfs.com/ipfs/'];
 const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg', 'image/avif': 'avif' };
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
-const VIA_PROXY = !!(process.env.HTTPS_PROXY || process.env.https_proxy || process.env.ALL_PROXY || process.env.all_proxy);
+const VIA_PROXY = !!(process.env.BSC_AGENT_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy || process.env.ALL_PROXY || process.env.all_proxy);
 async function httpsGet(u, signal) {
   await assertPublicHost(new URL(u).hostname, VIA_PROXY);
   return new Promise((resolve, reject) => {

@@ -108,6 +108,7 @@ cd bsc-agent
 | `MYSQL_URL` / `REDIS_URL` | 空 | 可选历史数据缓存，`scripts/enable-cache.sh` 可一键用 Docker 起 |
 
 ## 常见问题
+- **代币没有头像、池子显示「—」？** 头像、池子、K 线都来自国外行情站，国内网络多半连不上。打开「自检」看「能连上行情站」那一项；不通就在 `.env` 里加 `BSC_AGENT_PROXY=http://127.0.0.1:7897`（端口换成你自己代理软件的），保存后重启。
 - **右上角显示「演示账号」、页面是演示状态？** 说明用的是旧的 `.env`。更新到最新版（`git pull`）后重启即可；也可以直接删掉 `.env` 里的 `MODE=sim` 那一行，或重新 `cp .env.example .env`。
 - **页面右上角显示"未连接"？** 终端运行 `baw wallet status`，没有 `CONNECTED` 就重新 `baw auth signin`，并在币安 App 里确认。
 - **K 线缺一段 / 和别的软件不一样？** 历史 K 线来自 GeckoTerminal 和 DexScreener，免费接口有频率限制，页面上会出现一行黄色提示说明原因；新打开的币会在后台分页补历史，等几分钟再看。网络不通时请设置 `BSC_AGENT_PROXY`。

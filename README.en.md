@@ -107,6 +107,7 @@ Copy `.env.example` to `.env` and adjust as needed (`install.sh` already does th
 | `MYSQL_URL` / `REDIS_URL` | empty | Optional history cache; `scripts/enable-cache.sh` starts both with Docker |
 
 ## FAQ
+- **Tokens have no avatars and the pool shows "—"?** Avatars, pool size and charts come from overseas data sites that may be blocked on your network. Open the self-check and look at "can reach the market data sites". If it fails, add `BSC_AGENT_PROXY=http://127.0.0.1:7897` (use your own proxy port) to `.env`, save and restart.
 - **The top-right says "demo account" and the page looks like a demo?** You are using an old `.env`. Update to the latest version (`git pull`) and restart, or delete the `MODE=sim` line from `.env`, or run `cp .env.example .env` again.
 - **The wallet shows "not connected"?** Run `baw wallet status`. If it isn't `CONNECTED`, run `baw auth signin` again and confirm in the Binance App.
 - **A chart has a gap or differs from another site?** History comes from GeckoTerminal and DexScreener, whose free APIs are rate-limited. A yellow note above the chart explains why. For newly opened tokens the history is back-filled in the background, so wait a few minutes. If the network is blocked, set `BSC_AGENT_PROXY`.
