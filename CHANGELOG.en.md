@@ -4,6 +4,9 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.3.2
+- Fix: an old `.env` containing `MODE=sim` made the page show "demo account" and stopped it from working out of the box. The public version has no simulation mode and now always starts in live mode (sim is only allowed for development tests).
+
 ## 0.3.1
 - Maintenance release used to verify the GitHub new-version reminder: older versions will see the red dot on the GitHub icon and the update pop-up. No functional changes.
 

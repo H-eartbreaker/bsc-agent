@@ -12,7 +12,10 @@ try {
 } catch { /* 没有 .env 就算了 */ }
 export const env = (k, d) => (process.env[k] === undefined || process.env[k] === '' ? d : process.env[k]);   // 空值当没填
 
-export const MODE = env('MODE', 'live').toLowerCase();               // sim | live
+// 公开版没有模拟盘：老 .env 里残留的 MODE=sim 会让页面变成「演示账号」，这里一律按实盘处理（只有开发测试才允许 sim）
+const rawMode = env('MODE', 'live').toLowerCase();
+export const MODE = rawMode === 'sim' && !process.env.BSC_AGENT_DEV_SIM && !process.env.NODE_TEST_CONTEXT ? 'live' : rawMode;
+if (rawMode === 'sim' && MODE === 'live') console.warn('[config] .env 里的 MODE=sim 已忽略，按实盘启动（想去掉这条提示：删掉 .env 里的 MODE=sim 那一行）');
 // 默认实盘、可真实下单（登录币安钱包后，页面上点买卖就是真实交易；单笔上限见 MAX_TRADE_BNB）。
 // 自动功能（狙击 / 跟单 / 自动卖出）默认关着，你在页面上点「启动」后才会运行。LIVE_TRADE=0 = 只看行情不下单。
 export const LIVE_TRADE = env('LIVE_TRADE', '1') === '1';

@@ -107,6 +107,7 @@ Copy `.env.example` to `.env` and adjust as needed (`install.sh` already does th
 | `MYSQL_URL` / `REDIS_URL` | empty | Optional history cache; `scripts/enable-cache.sh` starts both with Docker |
 
 ## FAQ
+- **The top-right says "demo account" and the page looks like a demo?** You are using an old `.env`. Update to the latest version (`git pull`) and restart, or delete the `MODE=sim` line from `.env`, or run `cp .env.example .env` again.
 - **The wallet shows "not connected"?** Run `baw wallet status`. If it isn't `CONNECTED`, run `baw auth signin` again and confirm in the Binance App.
 - **A chart has a gap or differs from another site?** History comes from GeckoTerminal and DexScreener, whose free APIs are rate-limited. A yellow note above the chart explains why. For newly opened tokens the history is back-filled in the background, so wait a few minutes. If the network is blocked, set `BSC_AGENT_PROXY`.
 - **A buy fails?** The page explains the reason in plain language (insufficient balance, slippage too low, wallet not signed in…). You can also open the self-check.
