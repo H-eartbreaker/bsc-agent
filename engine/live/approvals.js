@@ -6,7 +6,8 @@
 // - 每次授权记到 data/approvals.json，页面「授权管理」据此读链上额度、提供「撤销」（approve 0，只在本人点击时发送）
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { ethers } from 'ethers';
-const FILE = new URL('../../data/approvals.json', import.meta.url);
+import { dataFile } from './config.js';
+const FILE = dataFile('approvals.json');
 const erc20 = new ethers.Interface(['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)']);
 const ctx = { trader: null, market: null };
 export function setApprovalCtx(c) { Object.assign(ctx, c); }
@@ -21,7 +22,7 @@ export function recordApproval({ token, spender, symbol, amount, kind }) {
 }
 export function listApprovals() { return load(); }
 
-const call = async (to, fn, args) => erc20.decodeFunctionResult(fn, await ctx.market.provider.call({ to, data: erc20.encodeFunctionData(fn, args) }))[0];
+const call = async (to, fn, args) => erc20.decodeFunctionResult(fn, await (ctx.market.tradeProvider || ctx.market.provider).call({ to, data: erc20.encodeFunctionData(fn, args) }))[0];
 
 // 这次授权该授多少（原始整数单位）。kind = 'quote'（报价币，按 BNB 价值）或 'sell'（卖出的代币，按全部余额）
 export async function capFor({ token, wallet, amount, kind }) {
@@ -48,6 +49,8 @@ export const capLabel = (kind) => (enabled() ? (kind === 'sell' ? '预先授权�
 export async function sendApproval({ send, wallet, token, spender, amount, cap, label, symbol, kind, step }) {
   try { const h = await send({ wallet, to: token, inputData: new ethers.Interface(['function approve(address,uint256)']).encodeFunctionData('approve', [spender, cap]), label, step }); recordApproval({ token, spender, symbol, amount: cap, kind }); return h; }
   catch (e) {
+    // 授权要在 App 里确认 / 已发出结果未知：记下要等的额度，上层（liveTrader.execute）确认后查到额度够了就接着卖出，不用再点一次
+    if (['APP_CONFIRM', 'UNCONFIRMED', 'UNKNOWN_SUBMIT'].includes(e.code)) e.approval = { token, spender, wallet, amount: BigInt(amount) };
     if (e.code === 'APP_CONFIRM' && cap > BigInt(amount) && ctx.trader) {
       ctx.trader.settings.preApproveCap = false; ctx.trader.saveSetting?.('preApproveCap', false); ctx.trader.emit?.('settings', ctx.trader.settings);
       e.message = `较大额度的授权触发了币安 App 确认，已自动关闭「预先授权」，以后改为只授权本次数量。这一笔请在 App 里处理（同意或拒绝）。${e.message}`;

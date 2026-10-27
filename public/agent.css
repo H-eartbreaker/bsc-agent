@@ -629,3 +629,51 @@ input::placeholder { color: var(--dim); opacity: 1; }
 #tokenList.market-cards > .tcard { grid-template-columns: clamp(48px, 16cqw, 64px) minmax(0, 1fr) minmax(116px, max-content); }
 #tokenList.market-cards .tc-buy { flex-wrap: nowrap; white-space: nowrap; }
 #tokenList.market-cards .tc-buy > span { flex: none; white-space: nowrap; }
+
+/* Desktop trench compact mode: a narrow desktop window shows one real column at a time. */
+.pulse-tools { grid-column:1 / -1; display:flex; align-items:center; gap:10px; min-height:42px; padding:0 14px; border-bottom:1px solid var(--line); background:var(--panel); flex:none; }
+.pulse-tools > b { color:var(--text); font-size:14px; }
+.pulse-tools .pulse-compact-toggle { margin-left:auto; padding:5px 9px; border:1px solid var(--line2); border-radius:6px; color:var(--muted); background:var(--panel2); }
+.pulse-tools .pulse-compact-toggle.on { color:var(--y); border-color:var(--y); }
+.pulse-cols { display:flex; gap:4px; }
+.pulse-cols button { padding:5px 8px; color:var(--muted); border:1px solid var(--line); background:transparent; }
+.pulse-cols button.on { color:var(--text); border-color:var(--y); background:var(--y-bg); }
+.market-trench-filter { padding:4px 8px; color:var(--y); border:1px solid var(--line2); border-radius:5px; background:transparent; font-size:11px; }
+.market-trench-filter:hover { border-color:var(--y); }
+@media (min-width:600px) and (max-width:980px) {
+  .pulse-tools { min-height:38px; padding:0 10px; }
+  .pulse-tools > span.muted { display:none; }
+  .pulse-tools .pulse-compact-toggle { display:none; }
+  .pulse-cols { margin-left:auto; }
+  .pulse.trench.pulse-compact { grid-template-columns:1fr; display:flex; flex-direction:column; overflow:hidden; }
+  .pulse.trench.pulse-compact .tcol { grid-column:1; display:none; min-width:0; width:100%; flex:1 1 auto; overflow:hidden; }
+  .pulse.trench.pulse-compact .tcol.pulse-col-active { display:flex; }
+  .pulse.trench.pulse-compact .tcb { min-height:0; }
+  .pulse.trench.pulse-compact .tcb > .tcard { grid-template-columns:56px minmax(0,1fr) 112px; min-height:126px; height:126px; }
+  .pulse.trench.pulse-compact .tc-img, .pulse.trench.pulse-compact .tc-img .logo.tl { width:56px; height:56px; }
+  .pulse.trench.pulse-compact .tch-r { flex:1; }
+}
+/* Keep the market summary readable when the detail pane narrows the left column. */
+.market-tools-summary { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:8px; }
+#marketQuickSummary { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#marketTrenchFilter, #marketSettingsToggle { flex:none; white-space:nowrap; }
+/* The trench header is a fixed row; the three feeds consume the remaining height. */
+.pulse.trench { grid-template-rows: 42px minmax(0, 1fr); align-content: normal; }
+.pulse-tools { align-self: start; height: 42px; box-sizing: border-box; }
+
+/* 屏蔽按钮（学 GMGN）：平时不显示，鼠标移到币卡片上，才在卡片最左上角出现一个屏蔽按钮，盖在头像左上角上。
+   卡片上不再放收藏按钮（战壕和行情页）；详情页和收藏栏里的收藏功能不受影响。 */
+#pulse .tcard, #tokenList.market-cards > .tcard { position: relative; }
+#pulse .tcard .tc-m, #tokenList.market-cards > .tcard .tc-m { position: static; padding-right: 0; }
+#pulse .tcard .tc-n, #tokenList.market-cards .tc-n { position: static; padding-right: 0; overflow: visible; }
+#pulse .tc-n .tc-fav, #tokenList.market-cards .tc-n .tc-fav { display: none !important; }
+#pulse .tc-n .tc-hide, #tokenList.market-cards .tc-n .tc-hide {
+  position: absolute !important; left: 8px; top: 8px; right: auto; bottom: auto; z-index: 4; margin: 0; padding: 0; flex: none; width: 30px; height: 30px; box-sizing: border-box;
+  display: inline-flex !important; align-items: center; justify-content: center; border: 1px solid rgba(255, 255, 255, .14) !important; border-radius: 8px;
+  background: rgba(14, 19, 24, .92); color: #9aa4b2; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .12s, background .12s, color .12s, border-color .12s, transform .08s;
+}
+#pulse .tcard:hover .tc-n .tc-hide, #pulse .tcard:focus-within .tc-n .tc-hide, #tokenList.market-cards > .tcard:hover .tc-n .tc-hide, #tokenList.market-cards > .tcard:focus-within .tc-n .tc-hide { opacity: 1; pointer-events: auto; }
+#pulse .tc-n .tc-hide svg, #tokenList.market-cards .tc-n .tc-hide svg { width: 18px; height: 18px; }
+#pulse .tcard:hover .tc-n .tc-hide:hover, #tokenList.market-cards > .tcard:hover .tc-n .tc-hide:hover { color: #e6ebf1; background: rgba(255, 255, 255, .10); border-color: rgba(255, 255, 255, .28) !important; }   /* 纯灰白，不带红色 */
+#pulse .tc-n .tc-hide:active, #tokenList.market-cards .tc-n .tc-hide:active { transform: scale(.92); }
+#pulse .tc-n .tc-hide:focus-visible, #tokenList.market-cards .tc-n .tc-hide:focus-visible { outline: 2px solid var(--y); outline-offset: -2px; }

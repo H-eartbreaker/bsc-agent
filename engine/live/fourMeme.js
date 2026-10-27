@@ -1,22 +1,24 @@
 // four.meme「Agentic Wallet 专属」内盘（OpenFour 模板 1778027615735）的链上行情：
 // 只读 OpenFourCore 的 TokenCreated / TradeExecuted 事件（按模板 presetId 过滤），不依赖 four.meme 网站 API。
-// 先回补最近 BACKFILL 个区块，然后每 POLL_MS 轮询新区块。
+// 先回补最近 BACKFILL 个区块；之后用 WebSocket 订阅新事件（NodeReal → publicnode 备用），每 60 秒用 getLogs 补查一次（订阅不可用时每 3 秒）。
 import { EventEmitter } from 'node:events';
 import { ethers } from 'ethers';
-import { maskRpc } from './rpc.js';
-import { env } from './config.js';
+import { maskRpc, FailoverProvider, WsLogs, PUBLIC_WSS } from './rpc.js';
+import { env, NODEREAL_URLS, NODEREAL_WSS } from './config.js';
+import { cache } from './cache.js';
 
 export const CORE = '0xebe7b6c1089d9f72ad07f34e36d898e44e5e27f3';
 export const AGENT_ID_TEMPLATE = 1778027615735n;
 const WBNB = '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c';
 // 扫 Four 事件（getLogs）：有 NodeReal 就用它，一次最多查约 5 万块；没有就用 publicnode，一次 5000 块。主节点出错时这一段自动拆成 5000 块用 publicnode 重查
-const NODEREAL = env('NODEREAL_RPC', '');
+const NODEREAL = NODEREAL_URLS[0] || '';
 const LOG_RPC = env('FOUR_LOG_RPC', NODEREAL || 'https://bsc-rpc.publicnode.com');
 const STEP = Number(env('FOUR_LOG_STEP', NODEREAL && LOG_RPC === NODEREAL ? 49000 : 5000));
 const FALLBACK_LOG_RPC = 'https://bsc-rpc.publicnode.com';
 // 启动时回补的区块数：以前是 2 万块（BSC 出块快，只有两三个小时），更早发射、又没进 data/fourTokens.json 的盘（如 4AGENT）就再也不出现，「已迁移」里也看不到。
 // 改成 15 万块（约一天），回补完的盘都会存进 fourTokens.json，之后重启从那里恢复
 const BACKFILL = Number(env('FOUR_BACKFILL_BLOCKS', 150000));
+const REORG = 15;   // 增量补历史时往回多查的区块数
 const POLL_MS = 1000, POLL_SLOW_MS = 3000;
 // 限流自动降速：连续 3 次限流 → 退回旧间隔 3000ms，冷却 10 分钟后再试快速
 const RL_RE = /429|rate.?limit|too many requests|-32005|limit exceeded|限流/i;
@@ -48,8 +50,9 @@ const quoteSym = (a) => (!a || a.toLowerCase() === WBNB || a === ethers.ZeroAddr
 export class FourMeme extends EventEmitter {
   constructor() {
     super();
-    this.provider = new ethers.JsonRpcProvider(LOG_RPC, 56, { staticNetwork: true });
-    this.core = new ethers.Contract(CORE, CORE_ABI, this.provider);
+    this.provider = new FailoverProvider([LOG_RPC, ...(LOG_RPC === NODEREAL ? NODEREAL_URLS : []), FALLBACK_LOG_RPC], 'four回补');   // 启动回补：大区间 getLogs 用 NodeReal（一次约 5 万块），出错自动换 publicnode
+    this.pub = new FailoverProvider([FALLBACK_LOG_RPC, LOG_RPC, ...(LOG_RPC === NODEREAL ? NODEREAL_URLS : [])], 'four补查');       // 平时补查、读合约：公共节点优先，省 NodeReal 额度
+    this.core = new ethers.Contract(CORE, CORE_ABI, this.pub);
     this.known = new Set();
     this.blockMs = 750;
     this.status = { connected: false, total: 0, head: 0, backfilledFrom: 0, lastError: null, lastPollMs: 0, rpc: maskRpc(LOG_RPC) };
@@ -57,8 +60,8 @@ export class FourMeme extends EventEmitter {
 
   start() { this.loop().catch((e) => { this.status.connected = false; this.status.lastError = e.shortMessage || e.message; }); }
 
-  async logs(topics, from, to) {
-    try { const r = await this.provider.getLogs({ address: CORE, topics, fromBlock: from, toBlock: to }); this.status.rpcActive = this.status.rpc; return r; }
+  async logs(topics, from, to, prov = this.provider) {
+    try { const r = await prov.getLogs({ address: CORE, topics, fromBlock: from, toBlock: to }); this.status.rpcActive = this.status.rpc; return r; }
     catch (e) {
       if (LOG_RPC === FALLBACK_LOG_RPC) throw e;
       this.fb ||= new ethers.JsonRpcProvider(FALLBACK_LOG_RPC, 56, { staticNetwork: true }); const out = [];
@@ -107,23 +110,38 @@ export class FourMeme extends EventEmitter {
   }
 
   // 某个币从创建到现在的全部成交（链上 TradeExecuted，按 token 过滤），旧→新
+  // 有 MySQL 缓存时只查上次查到的区块之后（往回多查 REORG 块防重组），旧的从库里读
   async tokenTrades(token, { lookbackBlocks } = {}) {
-    const info = await this.core.tokens(token).catch(() => null);
-    const head = await this.provider.getBlockNumber(); let from = Number(info?.createBlock || 0) || head - BACKFILL;
-    if (!this.headAt) await this.calibrate(head);
-    // Chart hydration is bounded so old contracts cannot trigger an unbounded archive scan.
-    const createBlock = from;
-    if (lookbackBlocks > 0) from = Math.max(from, head - Math.floor(lookbackBlocks) + 1);
-    const out = []; out.historyPartial = from > createBlock;
-    for (; from <= head; from += STEP) {
-      const logs = await this.logs([T_TRADE, ethers.zeroPadValue(token, 32)], from, Math.min(from + STEP - 1, head));
-      for (const l of logs) { const a = tradeIface.parseLog(l).args; out.push({ ts: this.tsOf(l.blockNumber), side: a.isBuy ? 'buy' : 'sell', tokens: f18(a.tokenAmount), bnb: f18(a.traderQuoteAmount), price: f18(a.lastPrice), trader: a.trader, tx: l.transactionHash }); }
+    if (lookbackBlocks > 0) {   // 图表只要最近一段（有范围限制，不走缓存）
+      const info = await this.core.tokens(token).catch(() => null);
+      const head = await this.provider.getBlockNumber(); let from = Number(info?.createBlock || 0) || head - BACKFILL;
+      if (!this.headAt) await this.calibrate(head);
+      // Chart hydration is bounded so old contracts cannot trigger an unbounded archive scan.
+      const createBlock = from;
+      if (lookbackBlocks > 0) from = Math.max(from, head - Math.floor(lookbackBlocks) + 1);
+      const out = []; out.historyPartial = from > createBlock;
+      for (; from <= head; from += STEP) {
+        const logs = await this.logs([T_TRADE, ethers.zeroPadValue(token, 32)], from, Math.min(from + STEP - 1, head));
+        for (const l of logs) { const a = tradeIface.parseLog(l).args; out.push({ ts: this.tsOf(l.blockNumber), side: a.isBuy ? 'buy' : 'sell', tokens: f18(a.tokenAmount), bnb: f18(a.traderQuoteAmount), price: f18(a.lastPrice), trader: a.trader, tx: l.transactionHash }); }
+      }
+      return out;
     }
-    return out;
+    return cache.history('four', token, async (cur) => {
+      const head = await this.provider.getBlockNumber(); let from;
+      if (cur != null) from = Math.max(0, cur - REORG);
+      else { const info = await this.core.tokens(token).catch(() => null); from = Number(info?.createBlock || 0) || head - BACKFILL; }
+      const out = [];
+      for (; from <= head; from += STEP) {
+        const logs = await this.logs([T_TRADE, ethers.zeroPadValue(token, 32)], from, Math.min(from + STEP - 1, head));
+        for (const l of logs) { const a = tradeIface.parseLog(l).args; out.push({ ts: this.tsOf(l.blockNumber), side: a.isBuy ? 'buy' : 'sell', tokens: f18(a.tokenAmount), bnb: f18(a.traderQuoteAmount), price: f18(a.lastPrice), trader: a.trader, tx: l.transactionHash, uid: `${l.transactionHash}:${l.index ?? l.logIndex}` }); }
+      }
+      return { rows: out, cursor: head };
+    }, (x) => x.uid || `${x.tx}:${x.side}:${x.tokens}`);
   }
 
   // 某个地址在某个币上的全部成交（链上 TradeExecuted，按 token + trader 过滤，从创建区块查到最新，每次 STEP 块）
   async traderTrades(token, trader) {
+    if (cache.enabled && await cache.mysql()) { const me = String(trader).toLowerCase(); return (await this.tokenTrades(token)).filter((x) => String(x.trader).toLowerCase() === me); }   // 有缓存：整盘成交基本已在库里，筛出这个地址
     const info = await this.core.tokens(token).catch(() => null);
     const head = await this.provider.getBlockNumber(); let from = Number(info?.createBlock || 0) || head - BACKFILL;
     const pad = (a) => ethers.zeroPadValue(a, 32); const out = [];
@@ -144,10 +162,10 @@ export class FourMeme extends EventEmitter {
     });
   }
 
-  async scan(from, to, live) {
-    const created = await this.logs([T_CREATED, TPL], from, to);
+  async scan(from, to, live, prov = this.provider) {
+    const created = await this.logs([T_CREATED, TPL], from, to, prov);
     for (const l of created) await this.onCreated(l, live);
-    const trades = await this.logs([T_TRADE, null, null, TPL], from, to);
+    const trades = await this.logs([T_TRADE, null, null, TPL], from, to, prov);
     for (const l of trades) { try { this.onTrade(l, live); } catch { /* 忽略解析失败 */ } }
   }
 
@@ -163,19 +181,23 @@ export class FourMeme extends EventEmitter {
     }
     this.status.connected = true; this.status.head = head;
     this.emit('ready');
+    // 实时：订阅 TokenCreated / TradeExecuted（只要 Agent 专属模板的）
+    this.ws = { connected: false };
+    this.sub = new WsLogs({ label: 'four', urls: [...(NODEREAL && LOG_RPC === NODEREAL ? NODEREAL_WSS : []), PUBLIC_WSS], status: this.ws,
+      filters: [{ address: CORE, topics: [T_CREATED, TPL] }, { address: CORE, topics: [T_TRADE, null, null, TPL] }],
+      onLog: (l) => { this.headAt = { n: l.blockNumber, ms: Date.now() }; if (l.topics[0] === T_CREATED) this.onCreated(l, true).catch(() => {}); else this.onTrade(l, true); } }).start();
+    // 补查：订阅正常时每 60 秒、不正常时每 3 秒，从上次查到的区块查到最新（公共节点优先，每段最多 5000 块）
     for (;;) {
-      await sleep(this.status.intervalMs || POLL_MS);
+      await sleep(this.sub.live ? 60_000 : 3_000);
       const t0 = Date.now();
       try {
-        const now = await this.provider.getBlockNumber();
+        const now = await this.pub.getBlockNumber();
         if (now <= head) continue;
-        const to = Math.min(now, head + STEP);
-        this.headAt = { n: to, ms: Date.now() };
-        await this.scan(head + 1, to, true);
-        head = to; this.status.head = head;
-        this.status.connected = true; this.status.lastError = null; rlNote(this.status, null);
-      } catch (e) { this.status.connected = false; this.status.lastError = e.shortMessage || e.message; rlNote(this.status, e); }
-      this.status.lastPollMs = Date.now() - t0;
+        this.headAt = { n: now, ms: Date.now() };
+        for (let f = Math.max(head + 1, now - 50_000); f <= now; f += 5000) { const to = Math.min(now, f + 4999); await this.scan(f, to, true, this.pub); head = to; }
+        this.status.head = head; this.status.connected = true; this.status.lastError = null;
+      } catch (e) { this.status.lastError = e.shortMessage || e.message; }
+      this.status.lastPollMs = Date.now() - t0; this.status.wss = this.ws.wss; this.status.wsConnected = this.ws.connected;
     }
   }
 }

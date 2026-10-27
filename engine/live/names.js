@@ -2,7 +2,8 @@
 // 查到的永久写入本地 data/names.json，重启不丢；查不到的 10 分钟后重查；查询出错不记为"没有"，稍后重试。
 import fs from 'node:fs';
 import { ethers } from 'ethers';
-const FILE = new URL('../../data/names.json', import.meta.url);
+import { dataFile } from './config.js';
+const FILE = dataFile('names.json');
 const RPCS = (process.env.NAME_RPC || 'https://bsc-rpc.publicnode.com,https://bsc.publicnode.com,https://bsc-dataseed.bnbchain.org').split(',');
 const regs = RPCS.map((u) => new ethers.Contract('0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F', ['function handleOf(address) view returns (string)'],
   new ethers.JsonRpcProvider(u, 56, { staticNetwork: true })));
@@ -36,6 +37,18 @@ export class NameCache {
     try { const j = await (await fetch(API + k, { signal: AbortSignal.timeout(8_000) })).json(); if (j?.data?.name) return j.data.name; } catch (e) { err = err || e; }
     if (err) throw err;   // 链上没查成功：不当成"没有域名"
     return null;
+  }
+
+  // 页面「查域名」：.ai（币安 Agent ID）和 SPACE ID 主域名都现查一遍（不排队），查到的写进缓存
+  async lookupBoth(address) {
+    const k = this.key(address); let ai = null, sid = null, aiErr = null, sidErr = null;
+    for (let i = 0; i < regs.length; i++) {
+      try { const h = await regs[(this.rr++) % regs.length].handleOf(k); ai = h ? h + '.ai' : null; aiErr = null; break; } catch (e) { aiErr = e; }
+    }
+    try { const j = await (await fetch(API + k, { signal: AbortSignal.timeout(8_000) })).json(); sid = j?.data?.name || null; } catch (e) { sidErr = e; }
+    if (aiErr && sidErr) throw aiErr;
+    const name = ai || sid; if (name) { this.map.set(k, { name, at: Date.now() }); this.ver++; this.save(); }
+    return { ai, sid, name, aiFailed: !!aiErr, sidFailed: !!sidErr };
   }
 
   kick() { while (this.running < 2 && this.queue.length) this.worker(); }

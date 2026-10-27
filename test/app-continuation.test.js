@@ -67,17 +67,23 @@ test('Portal send executes once, reports App message, waits and resumes instead 
 for (const approved of [true, false]) {
   test(`Gang V2 pending App ${approved ? 'approval resumes a single conversion' : 'timeout prevents conversion'}`, async () => {
     const source = readFileSync(new URL('../engine/live/gangV2Pads.js', import.meta.url), 'utf8');
-    const a = source.indexOf('  async sell('), b = source.indexOf('\n  }\n}', a) + 4;
+    const method = (name) => {   // 按花括号配平截出方法（后面再加别的方法也不影响）
+      let st = source.indexOf('  async ' + name + '('); if (st < 0) st = source.indexOf('  ' + name + '(');
+      assert.ok(st >= 0, name + ' 不见了');
+      let d = 0, i = source.indexOf(') {', st) + 2; for (; i < source.length; i++) { if (source[i] === '{') d++; else if (source[i] === '}' && --d === 0) break; }
+      return source.slice(st, i + 1);
+    };
+    const methodsSrc = ['sell', 'swapBack', 'notGraduated'].map(method).join(',\n');
     const token = '0x3333333333333333333333333333333333333333', quote = '0x4444444444444444444444444444444444444444';
     const events = [], submissions = [];
     let release; const app = new Promise(resolve => release = resolve);
     const baw = { marketSwap: async args => { events.push('convert'); submissions.push(args); return { orderId: 'convert-original' }; },
       pollOrder: async () => ({ status: 'FINISHED', txHash: hash('b'), toTokenActualQty: '0.000009' }) };
-    const context = vm.createContext({ ethers, baw, pad: new ethers.Interface(['function sell(address,uint256,uint256)']), isWbnb: () => false, minOut: v => v * 97n / 100n, BNB_NATIVE: ethers.ZeroAddress });
-    const target = vm.runInContext('({' + source.slice(a, b) + '})', context); let balanceReads = 0;
-    Object.assign(target, { provider: { call: async () => '0x' }, curve: async () => ({ pad: venue, c: {} }), quoteToken: () => quote,
+    const context = vm.createContext({ ONDO_RE: /(?!)/, viaUsdt: () => false, markViaUsdt() {}, USDT: '0x5555555555555555555555555555555555555555', assertLiquid: async address => assert.equal(address, quote), ethers, baw, pad: new ethers.Interface(['function sell(address,uint256,uint256)']), isWbnb: () => false, minOut: v => v * 97n / 100n, BNB_NATIVE: ethers.ZeroAddress });
+    const target = vm.runInContext('({' + methodsSrc + '})', context); let balanceReads = 0;
+    Object.assign(target, { provider: { call: async () => '0x', getBlockNumber: async () => 100 }, curve: async () => ({ pad: venue, c: {} }), quoteToken: () => quote,
       balanceOf: async address => address === token ? 10n ** 18n : (++balanceReads === 1 ? 90n : 91n) * 10n ** 18n,
-      ensureAllowance: async () => null, sellQuote: () => ({ out: 10n ** 18n }), decimals: async () => 18,
+      needsUsdt: async () => false, ensureAllowance: async () => null, sellQuote: () => ({ out: 10n ** 18n }), decimals: async () => 18,
       send: async () => { events.push('sell-submitted'); await app; if (!approved) throw Object.assign(Error('pending'), { code: 'APP_CONFIRM' }); events.push('sell-confirmed'); return hash('a'); } });
     const result = target.sell({ wallet, token, pct: 100, slippage: 3, step() {}, toBnb: true });
     await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(events, ['sell-submitted']); assert.equal(submissions.length, 0);

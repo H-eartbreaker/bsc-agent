@@ -1,37 +1,80 @@
 // 实盘行情适配器：把 Flap Agent Curve Reader + fsi、four.meme Agentic Wallet 专属内盘（链上事件）+ shrine 统一成和模拟盘一样的接口（list / get / detail / 事件）。
 import { EventEmitter } from 'node:events';
+import { pfetch } from '../netProxy.js';
 import { ethers } from 'ethers';
-import { RPC_URL, RPC_LIST, BNB_PRICE_URL } from './config.js';
-import { FailoverProvider, nodeName } from './rpc.js';
+import { RPC_URL, RPC_LIST, BNB_PRICE_URL, dataFile } from './config.js';
+import { FailoverProvider, nodeName, PUBLIC_RPC } from './rpc.js';
 import { AgentCurve } from './agentCurve.js';
 import { FourMeme, AGENT_ID_TEMPLATE } from './fourMeme.js';
 import { MetaFetcher, ipfsUrl } from './meta.js';
 import { GangFun } from './gangFun.js';
-import { GangChain } from './gangChain.js';
+import { GangChain, QUOTE_DEC } from './gangChain.js';
+import { FlapChain } from './flapChain.js';
+import { FlapNft } from './flapNft.js';
+import { GangPadChain } from './gangPadChain.js';
 import { GangV2 } from './gangV2Pads.js';
+import { V3_TRADE } from './gangV3.js';
+import { fairList } from './gangFair.js';
+import { DexFeed, dexBars, compactCandles } from './dexFeed.js';
 import { NameCache } from './names.js';
 import { ShrineFeeds, tokenInfo } from './shrine.js';
 import * as fsi from './fsi.js';
+import { cache } from './cache.js';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-const FOUR_REG = new URL('../../data/fourTokens.json', import.meta.url);
-const FLAP_REG = new URL('../../data/flapCreated.json', import.meta.url);
+import { getRoute, MIN_LIQ_USD } from './quoteRoutes.js';
+const FOUR_REG = dataFile('fourTokens.json');
+const FLAP_REG = dataFile('flapCreated.json');
 const BOOT = Date.now();
+const GANG_TOKEN = '0x0c6302401aa5325c2e36f170f52c00b1d220b405';   // GANG 市值（底栏）：随报价币价格一起从 DexScreener 拿，不额外读 RPC
 
 const MAX = 1000;                      // Flap Agent 曲线市场、持有中 / 收藏的币不参与淘汰，超出时淘汰最老的盘
 const num = (v) => { if (v == null || v === '') return null; if (typeof v === 'number') return v; const m = String(v).replace(/[$,\s]/g, '').match(/^(-?[\d.]+)([KMB])?$/i); if (!m) return Number(v) || null; return Number(m[1]) * ({ K: 1e3, M: 1e6, B: 1e9 }[(m[2] || '').toUpperCase()] || 1); };
 const sec2ms = (v) => { const x = Number(v); return !x ? Date.now() : x < 1e12 ? x * 1000 : x; };
 const isAgentish = (l) => l.agentExclusive === true || l.agent === true || l.isAgent === true || (Array.isArray(l.tags) && l.tags.some((t) => /agent/i.test(t)));
 
+// 报价币美元价兜底：gang.fun 对 FXIon 等 Ondo 币给 quoteUsd=0、DexScreener 偶尔失败 / 限流时，直接读路线表里最深池子（只读 slot0 / getReserves）
+// 池子另一边是稳定币按 $1，是 WBNB 按 BNB 价；别的配对币不算（返回 0）
+const STABLE = new Set(['USDT', 'USDC', 'USD1', 'U', 'BUSD', 'FDUSD']);
+const POOL_ABI = ['function token0() view returns (address)', 'function token1() view returns (address)', 'function slot0() view returns (uint160,int24,uint16,uint16,uint16,uint32,bool)', 'function getReserves() view returns (uint112,uint112,uint32)'];
+const DEC_ABI = ['function decimals() view returns (uint8)'];
+async function poolPriceUsd(provider, addr, bnbUsd) {
+  const k = String(addr).toLowerCase(), bp = getRoute(k)?.bestPool; if (!bp?.pair) return 0;
+  const w = String(bp.with || '').toUpperCase(), wUsd = STABLE.has(w) ? 1 : w === 'WBNB' || w === 'BNB' ? bnbUsd : 0; if (!(wUsd > 0)) return 0;
+  const pool = new ethers.Contract(bp.pair, POOL_ABI, provider);
+  const [t0, t1] = (await Promise.all([pool.token0(), pool.token1()])).map((a) => a.toLowerCase());
+  if (t0 !== k && t1 !== k) return 0;
+  const [d0, d1] = (await Promise.all([t0, t1].map((a) => new ethers.Contract(a, DEC_ABI, provider).decimals()))).map(Number);
+  let p1per0;   // 1 个 token0 值多少 token1（已按小数位换算）
+  try { const sq = Number((await pool.slot0())[0]) / 2 ** 96; p1per0 = sq * sq * 10 ** (d0 - d1); }
+  catch { const [r0, r1] = await pool.getReserves(); p1per0 = (Number(r1) / 10 ** d1) / (Number(r0) / 10 ** d0); }
+  if (!(p1per0 > 0) || !isFinite(p1per0)) return 0;
+  return (t0 === k ? p1per0 : 1 / p1per0) * wUsd;
+}
+
 export class LiveMarket extends EventEmitter {
-  quoteUsd(t) { const q = String(t?.quote || 'BNB').toUpperCase(); if (q === 'BNB' || q === 'WBNB') return this.bnbUsd; if (['USDT','USDC','USD1'].includes(q)) return 1; return this.qUsd[String(t.quoteAddress || '').toLowerCase()] || 0; }
+  quoteUsd(t) { const q = String(t?.quote || 'BNB').toUpperCase(); if (q === 'BNB' || q === 'WBNB') return this.bnbUsd; if (['USDT','USDC','USD1'].includes(q)) return 1; const a = String(t.quoteAddress || '').toLowerCase(), v = this.qUsd[a]; if (!(v > 0) && a && this.qpx && !this._qpxSoon && Date.now() - (this._qpxAt || 0) > 30_000) { this._qpxAt = Date.now(); this._qpxSoon = setTimeout(() => { this._qpxSoon = null; this.qpx(); }, 2000); } return v || 0; }   // 新出现的报价币没价格：2 秒后补查一次（30 秒最多一次），不等 60 秒轮询
   constructor() {
     super();
-    this.provider = new FailoverProvider(RPC_LIST);   // 主节点（NodeReal，如果配置了）+ 公共节点自动备用
+    // 两套节点：行情 / 持仓 / 监控这类不赶时间的读取走公共节点优先（省 NodeReal 额度）；下单、确认、卖前余额这条交易链路走 NodeReal 优先
+    this.provider = new FailoverProvider([PUBLIC_RPC, 'https://bsc-dataseed.bnbchain.org', ...RPC_LIST], '行情读取');   // 两个公共节点都不行时才用 NodeReal
+    this.tradeProvider = new FailoverProvider(RPC_LIST, '交易');
     this.curve = new AgentCurve(this.provider);
     this.four = new FourMeme();
     this.gang = new GangFun();
+    this.dexFeed = new DexFeed(new ethers.JsonRpcProvider(PUBLIC_RPC, 56, { staticNetwork: true }));   // 已发射币的外盘成交（PancakeSwap V2 池子的 Swap 事件）
     this.gangChain = new GangChain(this.provider);   // 链上创建事件，比接口轮询快
     this.gangChain.on('token', (it) => this.onGangChainToken(it));
+    this.flapChain = new FlapChain(this.provider);   // Flap 成交 / 新市场：链上订阅（代替 shrine 推送）
+    this.flapChain.on('trade', (tr) => this.onFlapChainTrade(tr));
+    this.gangPads = new GangPadChain(this.provider);   // Gang V2 全部成交（链上），以前只有最活跃的几个盘有成交（接口轮询）
+    this.gangPads.on('trade', (tr) => this.onGangTrade(tr, true));
+    // Flap 普通 Portal 的 Agent ID 门槛盘（NFT-gated）：只有这类 Portal 盘会进列表（普通 Flap Portal 盘本终端不跟踪）
+    this.flapNft = new FlapNft(this.provider);
+    this.flapNft.on('gated', (g, o) => this.upsertFlapNft(g, o).catch(() => {}));
+    this.flapNft.on('ungated', (g) => { const t = this.get(g.token); if (t?.nftGate) { t.nftGate = { ...t.nftGate, removed: true }; this.emit('detail', t.address); } });
+    this.flapNft.on('trade', (tr) => { const t = this.get(tr.token); if (t) { t._nftEvery = 6000; t._nftAt = 0; } this.onFlapNftTrade(tr); });   // 有成交：下一轮马上读状态
+    this.flapNft.on('dex', (g) => { const t = this.get(g.token); if (t && t.stage === 'curve') { t.stage = 'dex'; t.progress = 100; this.emit('migrate', this.summary(t)); } });
+    this.flapChain.on('created', () => { try { this.curve.tick?.(); } catch { /* 下一轮 Reader 轮询也会扫到 */ } });
     this.meta = new MetaFetcher();
     this.names = new NameCache();
     this.feeds = new ShrineFeeds();
@@ -45,6 +88,7 @@ export class LiveMarket extends EventEmitter {
     this.four.on('token', (it, { isNew }) => this.upsertFour(it, isNew));
     this.four.on('trade', (tr) => this.onFourTrade(tr));
     this.gang.on('token', (it, { isNew }) => this.upsertGang(it, isNew));
+    setInterval(() => { for (const t of this.tokens.values()) if (t.source === 'gang' && t.gangTrack === 'v3fair' && t.stage === 'curve') this.gangFairState(t).catch(() => {}); }, 15_000).unref?.();   // 打新盘：进度 / 是否已发射从 pad 读
     this.gang.on('trade', (tr, { live }) => this.onGangTrade(tr, live));
     this.feeds.on('launch', (l) => this.upsertShrine(l));
     this.feeds.on('trade', (m) => this.onStreamTrade(m));
@@ -53,7 +97,8 @@ export class LiveMarket extends EventEmitter {
     this.four.start();
     this.fourRestore();
     setTimeout(() => this.fourDexCheck(), 20_000); this.fourDexTimer = setInterval(() => this.fourDexCheck(), 60_000);
-    this.gang.start(); this.gangChain.start();
+    this.loadFairSales(); setInterval(() => this.loadFairSales(), 30_000).unref?.();   // 打新盘：gang.fun 普通代币接口不列，重启后链上订阅也不会补以前的，从打新列表接口补
+    this.gang.start(); this.gangChain.start(); this.flapChain.start(); this.gangPads.start(); this.flapNft.start();
     this.feeds.start();
     const blk = async () => { const t0 = Date.now(); try { this.block = await this.provider.getBlockNumber(); this.rpcMs = Date.now() - t0; this.rpcError = null; } catch (e) { this.rpcError = e.shortMessage || e.message; } };
     const px = async () => {
@@ -61,10 +106,11 @@ export class LiveMarket extends EventEmitter {
       catch { /* Binance 行情不可用时，下面使用 gang.fun 同批返回的 BNB 价格 */ }
       if (!(this.bnbUsd > 0) && this.gang.bnbUsd > 0) this.bnbUsd = this.gang.bnbUsd;
     };
-    const qpx = async () => { const qs = new Set(); for (const t of this.tokens.values()) if (t.quoteAddress && t.quote && !['BNB','WBNB','USDT','USDC','USD1'].includes(String(t.quote).toUpperCase())) qs.add(String(t.quoteAddress).toLowerCase());
-      for (const a of qs) { try { const j = await (await fetch('https://api.dexscreener.com/latest/dex/tokens/' + a)).json(); const ps = (j.pairs || []).filter((x) => x.chainId === 'bsc' && x.baseToken?.address?.toLowerCase() === a && +x.priceUsd).sort((x, y) => (y.liquidity?.usd || 0) - (x.liquidity?.usd || 0)); if (ps[0]) this.qUsd[a] = +ps[0].priceUsd; } catch { /* 保留上次 */ } } };
-    this.qpx = qpx; blk(); px(); setTimeout(qpx, 3000); setTimeout(() => this.warmDex(), 6000);
-    this.timers = [setInterval(blk, 3000), setInterval(px, 30_000), setInterval(qpx, 60_000), setInterval(() => this.warm(), 8000), setInterval(() => this.warmDex(), 45_000), setInterval(() => this.flapHolders(), 90_000)];
+    const qpx = async () => { const qs = new Set([GANG_TOKEN]); for (const t of this.tokens.values()) if (t.quoteAddress && t.quote && !['BNB','WBNB','USDT','USDC','USD1'].includes(String(t.quote).toUpperCase())) qs.add(String(t.quoteAddress).toLowerCase());
+      for (const a of qs) { try { const j = await (await pfetch('https://api.dexscreener.com/latest/dex/tokens/' + a, { signal: AbortSignal.timeout(6000) })).json(); const ps = (j.pairs || []).filter((x) => x.chainId === 'bsc' && x.baseToken?.address?.toLowerCase() === a && +x.priceUsd).sort((x, y) => (y.liquidity?.usd || 0) - (x.liquidity?.usd || 0)); if (ps[0]) { this.qUsd[a] = +ps[0].priceUsd; if (a === GANG_TOKEN) this.gangMcap = +ps[0].marketCap || +ps[0].fdv || +ps[0].priceUsd * 1e9; } } catch { /* 保留上次 */ }
+        if (!(this.qUsd[a] > 0)) { try { const v = await poolPriceUsd(this.provider, a, this.bnbUsd); if (v > 0) this.qUsd[a] = v; } catch { /* 下次再试 */ } } } };   // DexScreener 没给出价格：读链上池子兜底
+    this.qpx = qpx; blk(); px(); setTimeout(qpx, 3000); setTimeout(() => this.warmDex(), 6000); setTimeout(() => this.warmImages(), 9000);
+    this.timers = [setInterval(blk, 3000), setInterval(px, 30_000), setInterval(qpx, 60_000), setInterval(() => this.warm(), 3000), setInterval(() => this.warmDex(), 5_000), setInterval(() => this.warmImages(), 15_000), setInterval(() => this.flapHolders(), 90_000), setInterval(() => this.flapNftTick(), 6000)];
     setTimeout(() => this.flapHolders(), 15_000);
   }
 
@@ -81,7 +127,7 @@ export class LiveMarket extends EventEmitter {
  volume: 0, buyTax: 0, sellTax: 0, feeBps: null, trades: [], candles: [], creator: '', market: null });
       if (this.tokens.size > MAX) {
         const keep = this.keepSet?.() || new Set();   // 持有中、收藏的币（server.js 设置），永远不淘汰
-        const old = [...this.tokens.values()].filter((t) => !t.pinned && !keep.has(t.address) && t.source !== 'agent-curve' && !(t.source === 'four-agent' && t.stage === 'dex')).sort((a, b) => a.createdAt - b.createdAt)[0];
+        const old = [...this.tokens.values()].filter((t) => !t.pinned && !keep.has(t.address) && t.source !== 'agent-curve' && t.source !== 'flap-nft' && !(t.source === 'four-agent' && t.stage === 'dex')).sort((a, b) => a.createdAt - b.createdAt)[0];
         if (old) this.tokens.delete(old.address);
       }
     }
@@ -158,7 +204,7 @@ export class LiveMarket extends EventEmitter {
     for (let i = 0; i < list.length; i += 30) {
       const chunk = list.slice(i, i + 30);
       try {
-        const r = await (await fetch('https://api.dexscreener.com/tokens/v1/bsc/' + chunk.map((t) => t.address).join(','))).json();
+        const r = await (await pfetch('https://api.dexscreener.com/tokens/v1/bsc/' + chunk.map((t) => t.address).join(','))).json();
         const best = {};
         for (const p of Array.isArray(r) ? r : []) { const a = String(p.baseToken?.address || '').toLowerCase(); if (!/pancake/i.test(p.dexId || '') || !+p.priceUsd) continue; if (!best[a] || (p.liquidity?.usd || 0) > (best[a].liquidity?.usd || 0)) best[a] = p; }
         for (const t of chunk) {
@@ -181,12 +227,12 @@ export class LiveMarket extends EventEmitter {
       const list = [...this.tokens.values()]
         .filter((t) => t.stage === 'dex' && (t.source === 'agent-curve' || t.source === 'gang' || t.source === 'four-agent'))
         .sort((a, b) => b.createdAt - a.createdAt)
-        .slice(0, 90);
+        .slice(0, 150);
       for (let i = 0; i < list.length; i += 30) {
         const chunk = list.slice(i, i + 30);
         if (!chunk.length) break;
         try {
-          const r = await (await fetch('https://api.dexscreener.com/tokens/v1/bsc/' + chunk.map((t) => t.address).join(','), { signal: AbortSignal.timeout(10_000) })).json();
+          const r = await (await pfetch('https://api.dexscreener.com/tokens/v1/bsc/' + chunk.map((t) => t.address).join(','), { signal: AbortSignal.timeout(10_000) })).json();
           const best = {};
           for (const p of Array.isArray(r) ? r : []) {
             const a = String(p.baseToken?.address || '').toLowerCase();
@@ -195,13 +241,121 @@ export class LiveMarket extends EventEmitter {
           }
           for (const t of chunk) {
             const p = best[t.address]; if (!p) continue;
-            Object.assign(t, { pair: p.pairAddress, dexLiqUsd: p.liquidity?.usd || 0, dexMcapUsd: +p.marketCap || +p.fdv || 0, dexPriceUsd: +p.priceUsd });
+            { const fresh = Date.now() - (t.dexOnchainAt || 0) < 180_000;   // 刚用链上成交算过市值就不让 DexScreener（更新慢）覆盖，列表和详情才对得上
+              Object.assign(t, { pair: p.pairAddress, dexLiqUsd: p.liquidity?.usd || 0, ...(fresh ? {} : { dexMcapUsd: +p.marketCap || +p.fdv || 0, dexPriceUsd: +p.priceUsd }) }); }
+            if (!t.image && p.info?.imageUrl) t.image = p.info.imageUrl;   // 自己的来源没有头像时，用 DexScreener 的
             const q = this.quoteUsd(t); if (q > 0) t.price = +p.priceUsd / q;
             this.emit('detail', t.address);
           }
         } catch { /* 下轮继续预热 */ }
       }
     } finally { this.dexWarmBusy = false; }
+  }
+
+  // 没有头像地址的币，如果已经上了 DEX（不限币龄），向 DexScreener 要头像。每轮最多 60 个，同一个币 10 分钟内不重复问。
+  async warmImages() {
+    if (this.imgWarmBusy) return; this.imgWarmBusy = true;
+    try {
+      const now = Date.now();
+      const list = [...this.tokens.values()].filter((t) => !t.image && t.stage === 'dex' && !(t._imgAt && now - t._imgAt < 600_000)).slice(0, 60);
+      for (let i = 0; i < list.length; i += 30) {
+        const chunk = list.slice(i, i + 30); chunk.forEach((t) => { t._imgAt = now; });
+        try {
+          const r = await (await pfetch('https://api.dexscreener.com/tokens/v1/bsc/' + chunk.map((t) => t.address).join(','), { signal: AbortSignal.timeout(10_000) })).json();
+          for (const p of Array.isArray(r) ? r : []) {
+            const a = String(p.baseToken?.address || '').toLowerCase(), url = p.info?.imageUrl; if (!url) continue;
+            const t = chunk.find((x) => x.address === a); if (t && !t.image) { t.image = url; this.emit('detail', t.address); }
+          }
+        } catch { /* 下轮再试 */ }
+      }
+      // 第二来源：GeckoTerminal（DexScreener 没有的，再问它；一次最多 30 个地址；"missing" 是它的默认占位图，不算）
+      const rest = list.filter((t) => !t.image);
+      for (let i = 0; i < rest.length; i += 30) {
+        const chunk = rest.slice(i, i + 30);
+        try {
+          const r = await (await pfetch('https://api.geckoterminal.com/api/v2/networks/bsc/tokens/multi/' + chunk.map((t) => t.address).join(','), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })).json();
+          for (const d of r?.data || []) {
+            const a = String(d.attributes?.address || '').toLowerCase(), url = d.attributes?.image_url;
+            if (!url || /missing/i.test(url)) continue;
+            const t = chunk.find((x) => x.address === a); if (t && !t.image) { t.image = url; this.emit('detail', t.address); }
+          }
+        } catch { /* 下轮再试 */ }
+      }
+    } finally { this.imgWarmBusy = false; }
+  }
+
+  // Flap Portal 门槛盘：名字 / 代号 / 图标（metaURI 是 IPFS CID）+ 门槛 NFT 信息 + 内盘状态
+  async upsertFlapNft(g, { restore } = {}) {
+    const k = g.token, existed = this.tokens.has(k);
+    if (existed && this.get(k).source !== 'flap-nft') return;
+    // 先同步登记进列表（门槛 + 来源），名字 / 状态 / NFT 信息随后补上：搜索、钱包 2 收到订单时不用等这些读取
+    const t = this.base(k);
+    if (g.meta) Object.assign(t, { symbol: t.symbol === '?' ? g.meta.symbol || '?' : t.symbol, name: t.name || g.meta.name || '' });   // 上次读到的名字先用上：节点限流时也不显示「?」
+    Object.assign(t, { source: 'flap-nft', platform: 'flap', agentExclusive: g.nft === '0x60b9262456de011f7d15a54cdd8c48baaa8b022f', quote: t.quote || 'BNB', createdAt: g.at || g.seenAt, maxSupply: 1e9,
+      nftGate: { capPct: 2, ...t.nftGate, nft: g.nft, removed: !!g.removed, plain: !!g.plain, known: g.nft === '0x60b9262456de011f7d15a54cdd8c48baaa8b022f' } });
+    {
+      const [st, info] = await Promise.all([this.flapNftMeta(t).catch(() => {}), this.flapNft.state(k).catch(() => null), g.plain ? null : this.flapNft.nftInfo(g.nft).catch(() => null)]).then((r) => r.slice(1));
+      if (!g.at && g.block) { try { g.at = (await this.provider.getBlock(g.block)).timestamp * 1000; this.flapNft.save(); } catch { /* 用发现时间 */ } }
+      Object.assign(t, { createdAt: g.at || g.seenAt });
+      if (info) Object.assign(t.nftGate, { name: info.name, symbol: info.symbol, image: info.image, known: info.known });
+      if (st) await this.applyFlapNftState(t, st);
+      this.flapNftHistory(t).then(() => { if (t.stage === 'dex') return this.dexRefresh(t).then(() => this.emit('detail', t.address)); }).catch(() => {});   // 内盘成交从创建起补齐；已迁移的顺便读一次外盘价，列表里市值不再是「—」
+      await this.flapNftTax(t).catch(() => {});
+      if (!existed && !restore && t.stage === 'curve') this.emit('launch', { ...this.summary(t), detectMs: Math.max(0, Date.now() - (t.createdAt || Date.now())) });
+    }
+  }
+  // 名字 / 代号 / 图标：读失败（节点限流等）时为空，代号留着「?」；flapNftTick 每 30 秒重试一次，直到读到为止
+  async flapNftMeta(t) {
+    t.metaTryAt = Date.now();
+    const i = new ethers.Interface(['function name() view returns (string)', 'function symbol() view returns (string)', 'function metaURI() view returns (string)']);
+    const rd = (fn) => this.provider.call({ to: t.address, data: i.encodeFunctionData(fn) }).then((r) => i.decodeFunctionResult(fn, r)[0]).catch(() => '');
+    const [name, symbol, meta] = await Promise.all([rd('name'), rd('symbol'), rd('metaURI')]);
+    Object.assign(t, { symbol: symbol || t.symbol, name: name || t.name });
+    if (name || symbol) this.emit('detail', t.address);
+    // 读到的名字 / 代号 / 图标地址存进门槛盘登记表（data/flapNftGated.json），重启后直接用，不再依赖这一次读取成功
+    const g = this.flapNft.reg?.tokens?.[t.address];
+    this.loadMeta(t, ipfsUrl(meta) || g?.meta?.uri);
+    if (g && (name || symbol || meta)) { const m = { ...g.meta, ...(name && { name }), ...(symbol && { symbol }), ...(meta && { uri: ipfsUrl(meta) }) }; if (JSON.stringify(m) !== JSON.stringify(g.meta || {})) { g.meta = m; this.flapNft.save(); } }
+  }
+  async applyFlapNftState(t, st) {
+    if (st.quote !== ethers.ZeroAddress && t.quoteAddress?.toLowerCase() !== st.quote.toLowerCase()) {
+      t.quoteAddress = st.quote; t.quote = await this.provider.call({ to: st.quote, data: '0x95d89b41' }).then((r) => ethers.AbiCoder.defaultAbiCoder().decode(['string'], r)[0]).catch(() => '?');
+      t.flapNativeSwap = st.nativeSwap;
+    }
+    const price = Number(ethers.formatEther(st.price));
+    t.raised = Number(ethers.formatEther(st.reserve)); t.progress = st.status === 4 ? 100 : Math.min(100, st.progress);
+    t.target = t.progress > 0 && t.progress < 100 ? t.raised / (t.progress / 100) : t.target;
+    t.remaining = Math.max(0, Number(ethers.formatEther(st.dexThresh)) - Number(ethers.formatEther(st.circulating)));
+    // 有链上成交以后 K 线只按成交画（成交时间、成交后价格）；还没补到成交时才用轮询价格兜底。已迁移的内盘价格读出来是 0，不覆盖
+    if (price > 0 && price !== t.price) { t.price = price; if (!t.nftHistAt && !t.nftKeys?.size) this.pushCandle(t, Date.now(), price, 0); }
+    if (st.status !== 4 && t.price > 0) t.mcapUsd = t.price * 1e9 * this.quoteUsd(t);
+    if (st.status === 4 && t.stage === 'curve') { t.stage = 'dex'; t.progress = 100; this.emit('migrate', this.summary(t)); }
+    else if (st.status === 1 && !t.migrated) t.stage = 'curve';
+  }
+  // 税率 / 受益人 / 分红：读链上（flapNft.taxInfo），5 分钟刷新一次（累计分红、营销金额会变）
+  async flapNftTax(t, force = false) {
+    if (!force && t.flapTax && Date.now() - t.flapTax.at < 300_000) return;
+    const v = await this.flapNft.taxInfo(t.address); t.flapTax = v;
+    t.buyTax = v.buyBps / 100; t.sellTax = v.sellBps / 100;
+    const q = v.divSym === 'BNB' ? this.bnbUsd : 0;
+    t.gangDiv = { flap: true, taxed: v.divBps > 0, taxBps: Math.round(Math.max(v.buyBps, v.sellBps) * v.divBps / 10000), vault: v.divContract || null,
+      stats: v.divBps > 0 ? { quoteSymbol: v.divSym || '?', total: v.sentDiv, totalUsd: q ? v.sentDiv * q : null } : null };
+  }
+  // 门槛盘数量很少（每天几个）：内盘的每 6 秒读一次 Portal 状态（价格 / 进度 / 是否迁移）；已迁移的交给外盘逻辑
+  async flapNftTick() {
+    if (this.nftBusy) return; this.nftBusy = true;
+    try {
+      for (const t of [...this.tokens.values()].filter((x) => x.source === 'flap-nft')) {
+        // 状态没变的盘逐步放慢（6 秒 → 12 → 24 → 最多 60 秒），一变或链上推送来一笔成交就回到 6 秒。以前几十个没人买的内盘每 6 秒都读一遍
+        if (t.stage === 'curve' && Date.now() - (t._nftAt || 0) >= (t._nftEvery || 6000) - 500) try {
+          const st = await this.flapNft.state(t.address), h = `${st.status}|${st.reserve}|${st.circulating}`;
+          t._nftAt = Date.now(); t._nftEvery = h === t._nftH ? Math.min(60_000, (t._nftEvery || 6000) * 2) : 6000; t._nftH = h;
+          await this.applyFlapNftState(t, st); await this.flapNftTax(t);
+        } catch { /* 下一轮 */ }
+        // 名字没读到就重试（已迁移的也要：以前只重试内盘，迁移盘读失败一次就一直显示「?」）
+        if ((!t.name || t.symbol === '?' || !t.metaUrl) && Date.now() - (t.metaTryAt || 0) > 30_000) await this.flapNftMeta(t).catch(() => {});
+      }
+    } finally { this.nftBusy = false; }
   }
 
   // 图标 / 简介 / 社交链接，异步补上；列表每 0.5 秒推送一次，到了就显示
@@ -211,14 +365,85 @@ export class LiveMarket extends EventEmitter {
     this.meta.get(url, (m) => { Object.assign(t, m); this.emit('detail', t.address); });
   }
 
-  // 搜索粘贴地址：已在列表直接返回；否则查 Four 链上，查到就加进列表
+  // 搜索粘贴地址：已在列表直接返回；否则查 Four 链上，查到就加进列表；都不是内盘时按普通外盘代币收录（lookupDex）
   async lookup(address) {
     if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return null;
     let t = this.get(address);
+    const ds = t ? null : cache.fetchJson('https://api.dexscreener.com/tokens/v1/bsc/' + address.toLowerCase(), 15).catch(() => null);   // 和链上查找同时发出，外盘代币不用多等
     if (!t && await this.four.lookup(address)) t = this.get(address);
+    if (!t) t = await this.lookupGangV2(address).catch(() => null);
+    if (!t && await this.flapNft.check(address, { plain: true }).catch(() => null)) t = this.get(address);
+    if (!t) t = await this.lookupFair(address).catch(() => null);
+    if (!t) t = await this.lookupDex(address, await ds).catch(() => null);
     if (!t) return null;
     t.pinned = true;               // 手动打开的盘不被自动淘汰
     return this.summary(t);
+  }
+
+  // 普通外盘代币（GENIUS、EWYB 这类不在任何内盘平台的币）：DexScreener 最深的池子流动性 ≥ QUOTE_MIN_LIQ_USD（默认 $2 万）才收录，
+  // 计价 = 那个池子的另一边。K 线 / 现价走 dexCandles（DexScreener + GeckoTerminal，不读链），买卖走币安聚合（不直连 PancakeSwap V2，见 liveTrader.dexTrade）
+  async lookupDex(address, rows) {
+    const a = address.toLowerCase();
+    const ps = (Array.isArray(rows) ? rows : []).filter((p) => String(p.baseToken?.address).toLowerCase() === a && +p.priceUsd && !String(p.pairAddress).includes(':') && !['fourmeme', 'flapsh'].includes(p.dexId))
+      .sort((x, y) => (y.liquidity?.usd || 0) - (x.liquidity?.usd || 0));
+    const p = ps[0]; if (!p || !((p.liquidity?.usd || 0) >= MIN_LIQ_USD)) return null;
+    const qa = String(p.quoteToken?.address || '').toLowerCase(), wb = qa === '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c';
+    if (!wb && !['USDT', 'USDC', 'USD1'].includes(String(p.quoteToken?.symbol).toUpperCase()) && +p.priceNative > 0) this.qUsd[qa] ||= +p.priceUsd / +p.priceNative;   // 计价币美元价先用这个池子推出来，qpx 之后会刷新
+    if (this.get(a)) return this.get(a);
+    const t = this.base(a), sup = +p.fdv && +p.priceUsd ? +p.fdv / +p.priceUsd : 1e9;
+    Object.assign(t, { source: 'dex', platform: 'dex', symbol: p.baseToken.symbol || '?', name: p.baseToken.name || '', quote: wb ? 'BNB' : p.quoteToken.symbol, quoteAddress: qa,
+      createdAt: p.pairCreatedAt || Date.now(), stage: 'dex', progress: 100, maxSupply: sup, image: p.info?.imageUrl || null, pinned: true,
+      pair: p.pairAddress, dexPool: p.pairAddress, dexLiqUsd: p.liquidity.usd, dexMcapUsd: +p.marketCap || +p.fdv || 0, dexPriceUsd: +p.priceUsd, dexDex: `${p.dexId}${p.labels?.length ? ' ' + p.labels.join('/') : ''}`,
+      website: p.info?.websites?.[0]?.url || '', twitter: p.info?.socials?.find((x) => x.type === 'twitter')?.url || '', telegram: p.info?.socials?.find((x) => x.type === 'telegram')?.url || '' });
+    const q = this.quoteUsd(t); if (q) t.price = +p.priceUsd / q;
+    return t;
+  }
+
+  // Gang V2 新盘：本后端的订阅还没看到、但主后端已经发来狙击订单时（钱包 2 等），直接读链上曲线把它加进列表
+  async lookupGangV2(address) {
+    this._gv2 ||= new GangV2(this.provider, null);
+    const { c } = await this._gv2.curve(address);
+    const erc = new ethers.Contract(address, ['function name() view returns (string)', 'function symbol() view returns (string)'], this.provider);
+    const [name, symbol] = await Promise.all([erc.name().catch(() => ''), erc.symbol().catch(() => '?')]);
+    const q = String(c.quote).toLowerCase(), quoteSymbol = q === '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c' || c.quote === ethers.ZeroAddress ? 'BNB' : await this.gangChain.symbolOf(q);
+    if (this.get(address)) return this.get(address);   // 读链期间订阅已经收录
+    this.upsertGang({ address: address.toLowerCase(), name, symbol, creator: String(c.creator).toLowerCase(), createdAt: Math.floor(Date.now() / 1000), graduated: !!c.graduated, raisedQuote: 0, progressPct: 0, quoteSymbol, quoteAddress: q, track: c.v3 ? 'v3' : 'v2', taxed: !!c.taxed }, false);
+    return this.get(address);
+  }
+
+  // Gang V3 曲线盘 + 打新盘：以前只靠链上 Created 事件收录，重启后之前创建的都没了。启动时和每 30 秒从 gang.fun 列表补齐：
+  // V3 = /api/v3/tokens（没毕业的 + 24 小时内毕业的），打新 = /api/fair/sales 的认购中 + 24 小时内开盘的（进度等从 pad 读，见 gangFairState）
+  async loadFairSales() {
+    const day = Date.now() / 1000 - 86_400;
+    try {
+      const j = await fetch('https://gang.fun/api/v3/tokens?limit=100', { signal: AbortSignal.timeout(10_000) }).then((r) => r.json());
+      for (const x of j?.items || []) {
+        if (!x?.address || this.get(x.address) || (x.graduated && !(x.graduatedAt > day))) continue;
+        const qa = String(x.quoteAddress || '').toLowerCase(), dec = Number(x.quoteDecimals) || 18;
+        this.upsertGang({ address: x.address.toLowerCase(), name: x.name, symbol: x.symbol, creator: String(x.creator || '').toLowerCase(), creatorHandle: x.creatorHandle, logo: x.hasLogo ? x.logoUrl : null,
+          createdAt: x.createdAt || Math.floor(Date.now() / 1000), graduated: !!x.graduated, graduatedAt: x.graduatedAt || null, pair: x.pair || null, quoteAddress: qa,
+          quoteSymbol: qa === '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c' ? 'BNB' : x.quoteSymbol, raisedQuote: Number(ethers.formatUnits(BigInt(x.realQuote || 0), dec)), progressPct: Number(x.progressPct) || 0,
+          gradAmtQuote: Number(ethers.formatUnits(BigInt(x.gradAmt || 0), dec)) || undefined, priceQuote: Number(x.priceQuote) || 0, trades: x.trades || 0, track: 'v3', taxed: Number(x.dividendBps) > 0 }, false);
+        const t = this.get(x.address); if (t && !x.graduated) this.gangV2Curve(t).catch(() => {});
+      }
+    } catch { /* 下次再补 */ }
+    const lists = await Promise.all(['minting', 'launched'].map((st) => fairList(st).catch(() => [])));
+    for (const x of lists.flat()) {
+      if (this.get(x.token) || (x.status === 'launched' && !(x.createdAt > day))) continue;
+      this.upsertGang({ address: x.token.toLowerCase(), name: x.name, symbol: x.symbol, creator: String(x.creator || '').toLowerCase(), creatorHandle: x.creatorHandle, logo: x.logo, createdAt: x.createdAt || Math.floor(Date.now() / 1000),
+        graduated: x.status === 'launched', raisedQuote: 0, progressPct: 0, quoteSymbol: 'BNB', quoteAddress: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', track: 'v3fair' }, false);
+    }
+  }
+  // 搜索 / 下单时本后端还没收录的打新币：pad.sales() 有这个币就加进来
+  async lookupFair(address) {
+    const I = new ethers.Interface(['function sales(address) view returns (address creator)', 'function name() view returns (string)', 'function symbol() view returns (string)']);
+    const r = await this.provider.call({ to: '0x15cfd2dc8278fb87a1783ef42111618e20874365', data: I.encodeFunctionData('sales', [address]) });
+    const creator = ethers.AbiCoder.defaultAbiCoder().decode(['address'], r.slice(0, 66))[0];
+    if (creator === ethers.ZeroAddress) return null;
+    const rd = (fn) => this.provider.call({ to: address, data: I.encodeFunctionData(fn) }).then((x) => I.decodeFunctionResult(fn, x)[0]).catch(() => '');
+    const [name, symbol] = await Promise.all([rd('name'), rd('symbol')]);
+    if (!this.get(address)) this.upsertGang({ address: address.toLowerCase(), name, symbol: symbol || '?', creator: creator.toLowerCase(), createdAt: Math.floor(Date.now() / 1000), graduated: false, raisedQuote: 0, progressPct: 0, quoteSymbol: 'BNB', quoteAddress: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', track: 'v3fair' }, false);
+    const t = this.get(address); await this.gangFairState(t).catch(() => {}); return t;
   }
 
   // gang.fun：接口给的列表（已筹 / 进度 / 价格 / FDV / 持有人）；毕业门槛按 已筹 ÷ 进度 推算
@@ -227,17 +452,23 @@ export class LiveMarket extends EventEmitter {
     const t = this.base(it.address);
     // gang.fun 列表会同时返回 bnbUsd；作为 Binance 行情接口不可用时的只读备用价格。
     if (this.gang.bnbUsd > 0) this.bnbUsd = this.gang.bnbUsd;
+    const qa = String(it.quoteAddress || '').toLowerCase();
+    if (t._qDec == null && qa && QUOTE_DEC[qa]) t._qDec = QUOTE_DEC[qa];   // 已知的非 18 位报价币（XAUt 6 位、BEM 8 位）马上用，不等链上曲线
+    else if (t._qDec == null && qa && (it.track === 'v2' || it.track === 'v3') && qa !== '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c') { this._gv2 ||= new GangV2(this.provider, null); this._gv2.decimals(qa).then((d) => { t._qDec ??= d; }).catch(() => {}); }
     const raised = Number(it.raisedQuote ?? it.raisedBnb) || 0, pct = Number(it.progressPct) || 0;
     Object.assign(t, {
       source: 'gang', platform: 'gang', agentExclusive: true, symbol: it.symbol, name: it.name, quote: it.quoteSymbol || 'BNB', quoteAddress: it.quoteAddress || null, creator: it.creator,
-      creatorName: it.creatorHandle || null, feeBps: 100, sellFeeBps: 100, stage: it.graduated ? 'dex' : 'curve', raised, progress: pct, target: it.gradAmtQuote || (pct > 0 ? Math.round((raised / (pct / 100)) * 10) / 10 : (t.target || 15)), gangTrack: it.track || 'v1', remaining: t._v2Rem ?? null,   // 剩余可售：V2 从合约读，读到之前 / 老盘未知 = null（页面显示「—」）
-
-      price: Number(it.priceQuote ?? it.priceBnb) || t.price, mcapUsd: Number(it.fdvUsd) || 0, holders: it.holders ?? null, volume: Number(it.volume24hBnb) || 0, pair: it.pair || null, tradeCount: it.trades || 0,
+      creatorName: it.creatorHandle || null, feeBps: 100, sellFeeBps: 100, stage: it.graduated ? 'dex' : 'curve', migratedAt: it.graduatedAt ? it.graduatedAt * 1000 : t.migratedAt, raised: t._qDec && t._qDec !== 18 ? t.raised : raised, progress: pct, target: t._qDec && t._qDec !== 18 ? t.target : it.gradAmtQuote || (pct > 0 ? Math.round((raised / (pct / 100)) * 10) / 10 : (t.target || 15)),   /* 非 18 位报价币（XAUt）接口按 18 位给，数会小 1e12 倍，用链上读的 */ gangTrack: /^v3/.test(t.gangTrack || '') ? t.gangTrack : it.track || 'v1' /* 链上认出的 V3 不被接口的 v2 覆盖 */, remaining: t._v2Rem ?? null,   // 剩余可售：V2 从合约读，读到之前 / 老盘未知 = null（页面显示「—」）
+     
+      price: (t._qDec && t._qDec !== 18 ? 0 : Number(it.priceQuote ?? it.priceBnb)) || t.price, mcapUsd: (t._qDec && t._qDec !== 18 ? 0 : Number(it.fdvUsd)) || t.mcapUsd || 0, holders: it.holders ?? null,   // 币股等报价币盘接口常不给 fdvUsd，别把成交算出的市值覆盖成 0 volume: Number(it.volume24hBnb) || 0, pair: it.pair || null, tradeCount: it.trades || 0,
     });
+    if (t.gangTrack === 'v3fair' && t._fair) this.applyFair(t);   // 打新币：接口 / 链上事件按内盘给的 0/15、curve 不对，用 pad 读到的覆盖
+    else if (t.gangTrack === 'v3fair' && !t._fairAt) this.gangFairState(t).catch(() => {});   // 新打新盘（链上 Created 事件刚进来）：马上读一次 pad，不等 15 秒轮询
     if (!existed) t.createdAt = it.createdAt * 1000;
     if (it.lastTradeAt) t.lastTradeAt = Math.max(t.lastTradeAt || 0, it.lastTradeAt * 1000);
     if (it.creatorHandle) this.names.set(it.creator, it.creatorHandle);
     if (it.logo) t.image = it.logo;
+    if (it.taxed != null) t.gangDiv = { taxed: !!it.taxed, taxBps: it.taxBps ?? (it.taxed ? 100 : 0), vault: it.dividendVault || t.gangDiv?.vault || null, stats: it.dividends || t.gangDiv?.stats || null };   // 分红币 / 不分红（见 gangFun.fromV2）
     // V2 报价币（GANG / ZEC / 币股…）的美元价用 gang.fun 给的，quoteUsd() 换美元要用
     if (it.quoteAddress && it.quoteUsd && !(this.qUsd[it.quoteAddress.toLowerCase()] > 0)) this.qUsd[it.quoteAddress.toLowerCase()] = it.quoteUsd;
     if (isNew && !existed) this.emit('launch', { ...this.summary(t), detectMs: Math.max(0, Date.now() - t.createdAt) });   // 链上已经先发现过的，接口再看到时不重复提示
@@ -248,14 +479,92 @@ export class LiveMarket extends EventEmitter {
 
   // 链上发现的 Gang 新盘：先上列表（名称、符号、创建者、计价币都来自事件），市值 / 头像等等接口轮询补上
   onGangChainToken(it) {
-    const lat = it.seenAt - it.createdAt * 1000;
-    (this.gangLat ||= []).unshift({ symbol: it.symbol, address: it.address, block: it.block, createdAt: it.createdAt * 1000, seenAt: it.seenAt, latencyMs: lat, viaApiFirst: this.tokens.has(this.key(it.address)) }); this.gangLat.length = Math.min(this.gangLat.length, 20);
-    console.log(`[Gang 链上] 新盘 ${it.symbol}（${it.track === 'v2' ? 'V2 · ' + it.quoteSymbol : '老盘 · BNB'}）区块 ${it.block}，出块后 ${lat}ms 发现${this.tokens.has(this.key(it.address)) ? '（接口已先收录）' : ''}`);
+    // 链上订阅先推送、后补区块时间（it.timeP）：延迟统计和日志等真实区块时间到了再记，币的创建时间也随之改正
+    const apiFirst = this.tokens.has(this.key(it.address));
+    Promise.resolve(it.timeP).then((ts) => {
+      if (ts != null) { it.createdAt = ts; const t = this.get(it.address); if (t && it.fromChain && !apiFirst) t.createdAt = ts * 1000; }
+      const lat = it.seenAt - it.createdAt * 1000;
+      (this.gangLat ||= []).unshift({ symbol: it.symbol, address: it.address, block: it.block, createdAt: it.createdAt * 1000, seenAt: it.seenAt, latencyMs: lat, viaApiFirst: apiFirst }); this.gangLat.length = Math.min(this.gangLat.length, 20);
+      console.log(`[Gang 链上] 新盘 ${it.symbol}（${it.track === 'v3' ? 'V3 · ' + it.quoteSymbol : it.track === 'v3fair' ? 'V3 打新 · ' + it.quoteSymbol : it.track === 'v2' ? 'V2 · ' + it.quoteSymbol : '老盘 · BNB'}）区块 ${it.block}，出块后 ${lat}ms 发现${apiFirst ? '（接口已先收录）' : ''}`);
+    });
     if (this.tokens.has(this.key(it.address))) return;
     this.gang.seen.set(it.address, -1);
     this.upsertGang(it, true);
     const t = this.get(it.address);
-    if (t && it.track === 'v2') this.gangV2Curve(t).then(() => { if (!(t.price > 0) && t.launchPrice > 0) { t.price = t.launchPrice; const q = this.quoteUsd(t); if (q && !(t.mcapUsd > 0)) t.mcapUsd = t.price * 1e9 * q; } }).catch(() => {});
+    if (t && it.track === 'v3fair') this.gangFairState(t).catch(() => {});
+    if (t && (it.track === 'v2' || it.track === 'v3')) this.gangV2Curve(t).then(() => { if (!(t.price > 0) && t.launchPrice > 0) { t.price = t.launchPrice; const q = this.quoteUsd(t); if (q && !(t.mcapUsd > 0)) t.mcapUsd = t.price * 1e9 * q; } }).catch(() => {});
+  }
+
+  // 链上 Flap 成交（virtualBuyFill / virtualSellFill）：金额是报价币单位，和其他平台一致；按 tx + 方向去重（shrine 若也推了同一笔不会重复）
+  onFlapChainTrade(tr) {
+    const t = this.get(tr.token); if (!t || t.source !== 'agent-curve') return;
+    if (t.trades.some((x) => x.tx === tr.tx && x.side === tr.side)) return;
+    const trade = { ts: tr.ts || Date.now(), side: tr.side, bnb: tr.bnb, tokens: tr.tokens, price: tr.price, trader: tr.trader, tx: tr.tx };
+    this.addTrade(t, trade);
+    const q = this.quoteUsd(t); if (q && tr.price > 0) t.mcapUsd = tr.price * (t.maxSupply || 1e9) * q;
+    this.emit('trade', { address: t.address, symbol: t.symbol, ...trade, usd: tr.bnb * q, mcapUsd: t.mcapUsd });
+  }
+
+  // Flap Portal 门槛盘成交（flapNft.js 读 TokenBought / TokenSold）：金额是报价币单位，价格 = 成交后价格；按 tx:logIndex 去重
+  ingestFlapNft(t, tr) {
+    const key = `${tr.tx}:${tr.idx}`; t.nftKeys ||= new Set(); if (t.nftKeys.has(key)) return null; t.nftKeys.add(key);
+    if (tr.side === 'buy') t.buys++; else t.sells++;
+    t.volume += tr.bnb;
+    if (t.holdersKnown && tr.trader) {
+      const v = (t.bal.get(tr.trader) || 0) + (tr.side === 'buy' ? tr.tokens : -tr.tokens);
+      if (v > 1e-6) t.bal.set(tr.trader, v); else t.bal.delete(tr.trader);
+      t.holders = t.bal.size;
+    }
+    return { ts: tr.ts, side: tr.side, bnb: tr.bnb, tokens: tr.tokens, price: tr.price, trader: tr.trader, tx: tr.tx };
+  }
+  onFlapNftTrade(tr) {
+    const t = this.get(tr.token); if (!t || t.source !== 'flap-nft') return;
+    const trade = this.ingestFlapNft(t, tr); if (!trade) return;
+    if (t.stage === 'curve' && tr.ts >= (t.lastTradeAt || 0)) { const q = this.quoteUsd(t); if (q && tr.price > 0) t.mcapUsd = tr.price * 1e9 * q; }
+    this.addTrade(t, trade);
+    if (Date.now() - tr.ts < 60_000) this.emit('trade', { address: t.address, symbol: t.symbol, ...trade, usd: tr.bnb * this.quoteUsd(t), mcapUsd: t.mcapUsd });
+  }
+  // 从创建起的全部内盘成交重建：买卖笔数、成交量、持有人（净买入 > 0 的地址）、K 线（换掉轮询价格画的点，外盘部分留着）、最近 100 笔
+  async flapNftHistory(t, urgent = false) {
+    if (t.nftHistAt && Date.now() - t.nftHistAt < 30_000) return;
+    const list = await this.flapNft.history(t.address, urgent);
+    Object.assign(t, { nftKeys: new Set(), buys: 0, sells: 0, volume: 0, holdersKnown: true, bal: new Map(), holders: 0, nftHistAt: Date.now() });
+    t.candles = (t.candles || []).filter((c) => c.dex); t.trades = (t.trades || []).filter((x) => x.dex);
+    const q = this.quoteUsd(t), keep = [];
+    for (const tr of list) { const x = this.ingestFlapNft(t, tr); if (!x) continue; this.noteFirstBuy(t, x); if (x.price) this.pushCandle(t, x.ts, x.price, x.bnb); keep.push(x); }
+    for (const x of keep.slice(-100)) { x.usd = x.bnb * q; x.mcapUsd = x.price * 1e9 * q; x.name = this.names.peek(x.trader); }
+    t.trades = [...keep.slice(-100), ...t.trades].sort((a, b) => b.ts - a.ts).slice(0, 100);
+    const last = keep.at(-1);
+    if (last) { t.lastTradeAt = Math.max(t.lastTradeAt || 0, last.ts); if (t.stage === 'curve') { t.price = last.price; if (q) t.mcapUsd = last.price * 1e9 * q; } else if (!(t.price > 0)) { t.price = last.price; if (q) t.mcapUsd = last.price * 1e9 * q; } }
+    if (t.stage === 'dex') Object.assign(t, { holdersKnown: false, holders: null });   // 迁移以后外盘转账不经过 Portal，内盘算出来的持有人不准，不显示
+    t._chgAt = 0;
+  }
+
+  // Four：从创建起的全部成交（fourMeme.tokenTrades，走 MySQL 缓存只补新区块）→ 内盘 K 线、最近 100 笔、买卖笔数和成交量。外盘 K 线（dex）留着
+  async fourHistory(t) {
+    const list = await this.four.tokenTrades(t.address); if (!list.length) return;
+    const q = this.quoteUsd(t);
+    t.candles = (t.candles || []).filter((c) => c.dex);
+    let buys = 0, sells = 0, vol = 0;
+    for (const x of list) { if (x.side === 'buy') buys++; else sells++; vol += x.bnb || 0; if (x.price) this.pushCandle(t, x.ts, x.price, x.bnb || 0); }
+    Object.assign(t, { buys: Math.max(t.buys || 0, buys), sells: Math.max(t.sells || 0, sells), volume: Math.max(t.volume || 0, vol) });
+    const seen = new Set(t.trades.map((x) => `${x.tx}:${x.side}`));
+    for (const x of list.slice(-100)) if (!seen.has(`${x.tx}:${x.side}`)) t.trades.push({ ts: x.ts, side: x.side, bnb: x.bnb, tokens: x.tokens, price: x.price, trader: x.trader, tx: x.tx, usd: x.bnb * q, mcapUsd: x.price * (t.maxSupply || 1e9) * q, name: this.names.peek(x.trader) });
+    t.trades.sort((a, b) => b.ts - a.ts); if (t.trades.length > 100) t.trades.length = 100;
+    t.lastTradeAt = Math.max(t.lastTradeAt || 0, list.at(-1).ts); t._chgAt = 0;
+  }
+
+  // Flap Agent 曲线：fsi 成交记录。有 MySQL 缓存时只拉最新一页（每边 200 笔），接不上库里最新那笔才整份重拉（每边 5000 笔）
+  async fsiHistory(t) {
+    return cache.history('fsi', t.market, async (cur, old) => {
+      if (cur && old?.rows.length) {
+        const page = await fsi.fetchTrades(t.market, 200);
+        const gap = ['buy', 'sell'].some((sd) => { const a = page.filter((x) => x.side === sd); return a.length >= 200 && a.at(-1).ts > cur; });
+        if (!gap) return { rows: page, cursor: Math.max(cur, ...page.map((x) => x.ts)) };
+      }
+      const all = await fsi.fetchTrades(t.market, 5000);
+      return { rows: all, cursor: all.length ? Math.max(...all.map((x) => x.ts)) : null };
+    }, (x) => `${x.tx}:${x.side}:${x.tokens}`);
   }
 
   onGangTrade(tr, live) {
@@ -267,10 +576,64 @@ export class LiveMarket extends EventEmitter {
     if (tr.tx) { t.seenTx.add(id); if (t.seenTx.size > 5000) t.seenTx = new Set([...t.seenTx].slice(-2500)); }
     if (tr.name) this.names.set(tr.trader, tr.name);
     if (tr.side === 'buy') t.buys++; else t.sells++;
-    const trade = { ts: tr.ts, side: tr.side, bnb: tr.bnb, tokens: tr.tokens, price: tr.price, trader: tr.trader, tx: tr.tx, name: tr.name };
+    if (t.gangTrack === 'v3') t.volume = (t.volume || 0) + tr.bnb * this.qScale(t);   // V3 内盘成交量：开盘起的从链上历史算（gangV3History），之后的实时累加
+    // 链上事件和 gang.fun 接口都把报价币金额按 18 位小数给；BEM（8 位）、XAUt（6 位）这类要乘回 10^(18-dec)
+    const k = this.qScale(t);
+    const trade = { ts: tr.ts, side: tr.side, bnb: tr.bnb * k, tokens: tr.tokens, price: tr.price * k, trader: tr.trader, tx: tr.tx, name: tr.name };
     this.addTrade(t, trade);
-    if (live) this.emit('trade', { address: t.address, symbol: t.symbol, ...trade, usd: tr.bnb * this.quoteUsd(t), mcapUsd: t.mcapUsd });   // Gang V2 的金额是报价币（GANG / BNCB…），按报价币价格换美元
+    if (k !== 1 && trade.price > 0 && trade.ts >= (t.lastTradeAt || 0) - 1) { const u = this.quoteUsd(t); if (u) t.mcapUsd = t.price * 1e9 * u; }   // 接口的 fdvUsd 也按 18 位算错了，用成交价重算
+    if (live) this.emit('trade', { address: t.address, symbol: t.symbol, ...trade, usd: trade.bnb * this.quoteUsd(t), mcapUsd: t.mcapUsd });   // Gang V2 的金额是报价币（GANG / BNCB…），按报价币价格换美元
   }
+
+  // Gang V3 曲线盘从开盘起的全部成交（pad 的链上 Buy / Sell，真实出块时间）→ 重建内盘 K 线、买卖笔数、成交量，最近 100 笔换成带真实时间的。
+  // 第一次从创建前一点的区块查起，之后只补新区块（15 秒内不重复查）。返回新增的笔数
+  async gangV3History(t) {
+    const h = t._v3Hist ||= { rows: [], block: 0, at: 0 };
+    if (h.busy) return h.busy;
+    if (Date.now() - h.at < 15_000) return 0;
+    h.busy = (async () => {
+      this._gv2 ||= new GangV2(this.provider, null);
+      const { pad } = await this._gv2.curve(t.address);
+      const head = await this.provider.getBlockNumber();
+      if (!h.block) {   // 按平均出块时间从创建时间倒推起始区块，多往前 600 块
+        const [a, b] = await Promise.all([this.provider.getBlock(head), this.provider.getBlock(head - 10_000)]);
+        let c = t.createdAt || (a.timestamp - 86_400) * 1000; if (c > 1e14) c /= 1000;   // 接口给毫秒时 createdAt 会被多乘一次 1000
+        const bt = (a.timestamp - b.timestamp) / 10_000 || 0.45, age = Math.max(0, a.timestamp - Math.floor(c / 1000));
+        h.block = Math.max(1, head - 400_000, head - Math.ceil(age / bt) - 600) - 1;
+      }
+      // 每 2000 块记一次进度：中途被限流 / 出错，下次从断点接着查，不从头重来；出错 60 秒后再试
+      const seen = new Set(h.rows.map((x) => `${x.tx}:${x.side}:${x.tokens}`)); let n = 0;
+      try {
+        while (h.block < head) {
+          const to = Math.min(head, h.block + 2000);
+          for (const x of await this.gangPads.history(t.address, pad, h.block + 1, to)) { const id = `${x.tx}:${x.side}:${x.tokens}`; if (!seen.has(id)) { seen.add(id); h.rows.push(x); n++; } }
+          h.block = to;
+        }
+      } finally { h.at = Date.now() + (h.block < head ? 45_000 : 0); if (n) this.applyV3History(t); }
+      return n;
+    })().finally(() => { h.busy = null; });
+    return h.busy;
+  }
+  v3Row(t, x) { const k = this.qScale(t); return { ts: x.ts, side: x.side, bnb: x.bnb * k, tokens: x.tokens, price: x.price * k, trader: x.trader, tx: x.tx }; }
+  applyV3History(t) {
+    const rows = (t._v3Hist?.rows || []).map((x) => this.v3Row(t, x)); if (!rows.length) return;
+    const last = rows.at(-1), tx = new Set(rows.map((x) => `${x.tx}:${x.side}`));
+    // 历史之后才到的实时成交（还没进历史的）补在后面，K 线不会少最新一两笔
+    const live = (t.trades || []).filter((x) => !tx.has(`${x.tx}:${x.side}`) && x.ts > last.ts && !x.dex);
+    t.candles = (t.candles || []).filter((c) => c.dex);
+    let buys = 0, sells = 0, vol = 0;
+    for (const x of [...rows, ...live.slice().reverse()]) { if (x.side === 'buy') buys++; else sells++; vol += x.bnb || 0; if (x.price > 0) this.pushCandle(t, x.ts, x.price, x.bnb || 0); }
+    Object.assign(t, { buys, sells, volume: vol });
+    t.seenTx ||= new Set(); for (const x of rows) t.seenTx.add(`${x.tx}:${x.side}:${x.tokens}`);
+    const q = this.quoteUsd(t), old = new Map((t.trades || []).map((x) => [`${x.tx}:${x.side}`, x]));
+    const keep = rows.slice(-100).map((x) => { const o = old.get(`${x.tx}:${x.side}`); return { ...x, name: o?.name || this.names.peek(x.trader), usd: x.bnb * q, mcapUsd: x.price * 1e9 * q }; });
+    t.trades = [...keep, ...(t.trades || []).filter((x) => !tx.has(`${x.tx}:${x.side}`))].sort((a, b) => b.ts - a.ts).slice(0, 100);
+    for (const x of rows) this.noteFirstBuy(t, x);
+    t.lastTradeAt = Math.max(t.lastTradeAt || 0, last.ts); t._chgAt = 0;
+  }
+
+  // 报价币不是 18 位小数时，18 位口径的金额 / 价格要乘的倍数（BEM 8 位 = 1e10）
+  qScale(t) { return t._qDec && t._qDec !== 18 ? 10 ** (18 - t._qDec) : 1; }
 
   // four.meme 成交：更新已筹、进度、价格、K 线和成交列表
   onFourTrade(tr) {
@@ -347,30 +710,91 @@ export class LiveMarket extends EventEmitter {
     else { const o = c ? c.c : price; t.candles.splice(i + 1, 0, { t: b, o, h: Math.max(o, price), l: Math.min(o, price), c: price, v: vol }); if (t.candles.length > 4000) t.candles.shift(); }
   }
 
+  // 已迁移（dex）的币：读 PancakeSwap V2 池子的 Swap 事件（dexFeed.js），接在内盘 K 线后面，并补成交列表、24 小时外盘成交量、底池、现价。
+  // 第一次最多等 2.5 秒，补不完的历史在后台接着补，补到了再推一次详情。找不到池子（或链上读不到）时退回 GeckoTerminal 分钟 K 线
+  async dexRefresh(t) {
+    const run = this.dexFeed.sync(t).then((n) => { if (n) { this.applyDex(t); this.emit('detail', t.address); } }).catch(() => {});
+    const has = () => t.dexSwaps?.length || t.dexHist?.length;
+    if (!has()) await Promise.race([run, new Promise((r) => setTimeout(r, 2500))]);
+    if (has()) this.applyDex(t); else await this.dexCandles(t);
+  }
+  applyDex(t) {
+    const s = t.dexSwaps || [], bars = dexBars(s, t.dexHist || []); if (!bars.length) return;
+    const q = this.quoteUsd(t); this.joinDex(t, bars);
+    const last = s[s.length - 1]; t.price = last ? last.price : bars[bars.length - 1].c; if (last) t.lastTradeAt = Math.max(t.lastTradeAt || 0, last.ts);
+    if (q) { t.dexOnchainAt = Date.now(); t.mcapUsd = t.dexMcapUsd = t.price * (t.maxSupply || 1e9) * q; if (t.dexQuoteRes) t.dexLiqUsd = t.dexQuoteRes * 2 * q; }
+    const day = Date.now() - 86_400_000; let v = 0, nb = 0, ns = 0;
+    for (let k = s.length - 1; k >= 0 && s[k].ts >= day; k--) { v += s[k].bnb; if (s[k].side === 'buy') nb++; else ns++; }
+    const from = s.length ? s[0].ts / 1000 : Infinity; for (const c of t.dexHist || []) if (c.t * 1000 >= day && c.t < Math.floor(from / 60) * 60) v += c.v;   // 链上读不到的更早部分用 GeckoTerminal 分钟线的成交量
+    Object.assign(t, { dexVol24: v, dexBuys24: nb, dexSells24: ns, dexCountMin: s.length ? Math.max(1, Math.round((Date.now() - Math.max(day, s[0].ts)) / 60_000)) : 0 });   // 买卖笔数只有链上读到的这段（约 1 小时）
+    const recent = s.slice(-100).reverse().map((x) => ({ ...x, usd: x.bnb * q, mcapUsd: x.price * (t.maxSupply || 1e9) * q, name: x.trader ? this.names.peek(x.trader) : null }));
+    t.trades = [...recent, ...t.trades.filter((x) => !x.dex)].sort((a, b) => b.ts - a.ts).slice(0, 100);
+  }
+  // 内盘 K 线 + 外盘 K 线接成一条：内盘的全部保留（只换掉上次接上的外盘部分）
+  joinDex(t, bars) {
+    const curve = (t.candles || []).filter((c) => !c.dex), end = curve.length ? curve[curve.length - 1].t : -Infinity;
+    // 外盘第一根分钟线的起点（如 06:40:00）常早于内盘最后一笔（06:40:43）：以前把这一分钟里的内盘成交整段删掉，K 线在毕业处断开一截。
+    // 现在内盘全部保留，落在内盘结束之前的外盘线并成一根，放在内盘最后一笔之后
+    const head = bars.filter((c) => c.t <= end), tail = bars.filter((c) => c.t > end);
+    if (head.length) tail.unshift({ t: end + 1, o: head[0].o, h: Math.max(...head.map((c) => c.h)), l: Math.min(...head.map((c) => c.l)), c: head[head.length - 1].c, v: head.reduce((x, c) => x + c.v, 0), dex: 1 });
+    if (tail[0] && tail[1] && tail[0].t >= tail[1].t) tail.splice(0, 2, { ...tail[1], o: tail[0].o, h: Math.max(tail[0].h, tail[1].h), l: Math.min(tail[0].l, tail[1].l), v: tail[0].v + tail[1].v });
+    if (tail[0] && curve.length) { const o = curve[curve.length - 1].c; tail[0] = { ...tail[0], o, h: Math.max(tail[0].h, o), l: Math.min(tail[0].l, o) }; }   // 外盘第一根从内盘收盘价开，两段接上
+    t.candles = curve.concat(tail);
+  }
+
   // 已迁移（dex）的币：曲线 ticks 停在毕业那一刻，外盘价格要从 PancakeSwap 池子拿。
   // DexScreener 找流动性最大的池子 → GeckoTerminal 分钟 OHLCV（USD）÷ 计价币 USD = 计价币单价，与内盘 K 线同一单位。选中时每 20 秒刷新。
   async dexCandles(t) {
-    const merge = () => { if (!t.dexBars?.length) return false; const first = t.dexBars[0].t; t.candles = (t.candles || []).filter((c) => c.t < first && !c.dex).concat(t.dexBars); if (t.candles.length > 4000) t.candles.splice(0, t.candles.length - 4000); t.price = t.dexBars[t.dexBars.length - 1].c; const q = this.quoteUsd(t); if (q) t.mcapUsd = t.price * (t.maxSupply || 1e9) * q; return true; };
-    if (t.dexAt && Date.now() - t.dexAt < 20_000) { merge(); return; } t.dexAt = Date.now();
+    const merge = () => { if (!t.dexBars?.length) return false; this.joinDex(t, t.dexBars); if (t.candles.length > 11000) t.candles.splice(0, t.candles.length - 11000); if (t.source !== 'gang') { t.price = t.dexBars[t.dexBars.length - 1].c; const q = this.quoteUsd(t); if (q) t.mcapUsd = t.price * (t.maxSupply || 1e9) * q; } return true; };   // Gang 的币：价格和市值以 gang.fun 的为准
+    if (t.dexAt && Date.now() - t.dexAt < 5_000) { merge(); return; } t.dexAt = Date.now();
     try {
-      {
-        const r = await (await fetch('https://api.dexscreener.com/tokens/v1/bsc/' + t.address)).json();
+      if (!(t.dexPool && Date.now() - (t.dexPoolAt || 0) < 60_000)) {   // 池子地址 60 秒内已知，不再多问一次 DexScreener
+        const r = await cache.fetchJson('https://api.dexscreener.com/tokens/v1/bsc/' + t.address, 15);   // Redis 共用 15 秒（几个钱包后端同时看同一个币时只请求一次）
         const ps = (Array.isArray(r) ? r : []).filter((p) => String(p.baseToken?.address).toLowerCase() === t.address && +p.priceUsd).sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
-        if (!ps[0]) return; t.dexPool = ps[0].pairAddress; t.dexPoolAt = Date.now();
+        if (!ps[0]) { t.dexNote = '没找到这个币的外盘池子（DexScreener 没返回，可能网络 / 代理不通；会自动重试）'; t.dexAt = 0; return; } t.dexPool = ps[0].pairAddress; t.dexPoolAt = Date.now();
         Object.assign(t, { pair: ps[0].pairAddress, dexLiqUsd: ps[0].liquidity?.usd || 0, dexMcapUsd: +ps[0].marketCap || +ps[0].fdv || 0, dexPriceUsd: +ps[0].priceUsd });
       }
       const q = this.quoteUsd(t); if (!q) return;
-      const j = await (await fetch(`https://api.geckoterminal.com/api/v2/networks/bsc/pools/${t.dexPool}/ohlcv/minute?aggregate=1&limit=1000&currency=usd&token=${t.address}`, { headers: { accept: 'application/json' } })).json();
-      const list = (j?.data?.attributes?.ohlcv_list || []).slice().sort((a, b) => a[0] - b[0]);
+      const j = await cache.fetchJson(`https://api.geckoterminal.com/api/v2/networks/bsc/pools/${t.dexPool}/ohlcv/minute?aggregate=1&limit=1000&currency=usd&token=${t.address}`, 15, { headers: { accept: 'application/json' } });
+      if (!j?.data) { t.dexNote = '外盘历史 K 线没取到（池子 ' + String(t.dexPool || '未找到').slice(0, 10) + '；返回：' + JSON.stringify(j ?? null).slice(0, 70) + '）会自动重试'; t.dexAt = 0; this.emit('detail', t.address); return; }   // 没拿到就别用「每分钟一个现价」假装是历史
+      t.dexNote = '';
+      let list = (j?.data?.attributes?.ohlcv_list || []).slice().sort((a, b) => a[0] - b[0]);
+      // MySQL 缓存：分钟 K 线存下来，接口只给最近 1000 根，更早的从库里接上（重启后也在）
+      if (list.length) {
+        if (t._barsPool !== t.dexPool) { const old = await cache.loadBars(t.dexPool, 4000).catch(() => null); Object.assign(t, { _barsPool: t.dexPool, _barT: 0, _usdBars: new Map((old || []).map((x) => [x[0], x])) }); }
+        if (t._usdBars) {
+          cache.saveBars(t.dexPool, list.filter((x) => x[0] >= t._barT)).catch(() => {}); t._barT = list.at(-1)[0];   // 只存新的（最后一根会变，所以含等于）
+          for (const x of list) t._usdBars.set(x[0], x);
+          list = [...t._usdBars.values()].sort((a, b) => a[0] - b[0]).slice(-11000); if (t._usdBars.size > 12000) t._usdBars = new Map(list.map((x) => [x[0], x]));
+        }
+      }
+      // 接口一页只给 1000 根（约 16 小时）：后台往前一页页补到迁移时间（最多约 8 天），不卡住当前刷新；补到的存进 _usdBars，刷新不会丢
+      if (list.length >= 1000 && t._deepPool !== t.dexPool && !t._deepBusy && Date.now() - (t._deepAt || 0) > 60_000 && t._usdBars) {
+        t._deepBusy = true; t._deepAt = Date.now(); const pool = t.dexPool, usd = t._usdBars;
+        (async () => {
+          try {
+            let before = Math.min(...usd.keys()), fail = false;
+            for (let pg = 0; pg < 12; pg++) {
+              const jj = await cache.fetchJson(`https://api.geckoterminal.com/api/v2/networks/bsc/pools/${pool}/ohlcv/minute?aggregate=1&limit=1000&currency=usd&token=${t.address}&before_timestamp=${before}`, 600, { headers: { accept: 'application/json' } }).catch(() => null);
+              if (!jj?.data) { fail = true; break; }
+              const l2 = jj.data.attributes?.ohlcv_list || []; if (!l2.length) break;
+              for (const x of l2) usd.set(x[0], x); const mn = Math.min(...l2.map((x) => x[0]));
+              if (l2.length < 1000 || mn >= before || (t.migratedAt && mn * 1000 <= t.migratedAt - 3_600_000)) break; before = mn;
+              await new Promise((r) => setTimeout(r, 2600));
+            }
+            if (!fail) t._deepPool = pool; t.dexAt = 0; this.emit('detail', t.address);
+          } finally { t._deepBusy = false; }
+        })();
+      }
       if (!list.length) {   // GeckoTerminal 没收录这个池子：用 DexScreener 实时价按分钟攒 K 线
-        const p = t.dexPriceUsd / q, m = Math.floor(Date.now() / 60_000) * 60; t.dexBars = t.dexBars || []; const l = t.dexBars[t.dexBars.length - 1];
+        const p = t.source === 'gang' && t.price > 0 ? t.price : t.dexPriceUsd / q, m = Math.floor(Date.now() / 60_000) * 60; t.dexBars = t.dexBars || []; const l = t.dexBars[t.dexBars.length - 1];
         if (l && l.t === m) { l.h = Math.max(l.h, p); l.l = Math.min(l.l, p); l.c = p; } else t.dexBars.push({ t: m, o: l ? l.c : p, h: Math.max(p, l ? l.c : p), l: Math.min(p, l ? l.c : p), c: p, v: 0, dex: 1 });
         merge(); this.emit('detail', t.address); return;
       }
       t.dexBars = list.map(([ts, o, h, l, c, v]) => ({ t: ts, o: o / q, h: h / q, l: l / q, c: c / q, v: v / q, dex: 1 }));   // 内盘时期的 K 线保留在前面
       merge();
       this.emit('detail', t.address);
-    } catch { /* 下次再试 */ }
+    } catch (e) { t.dexNote = '外盘历史 K 线读取失败：' + String(e?.message || e).slice(0, 60) + '（会自动重试）'; t.dexAt = 0; }
   }
 
   // Rehydrate recent Four trades after a restart or direct CA lookup, once per token/minute.
@@ -405,9 +829,18 @@ export class LiveMarket extends EventEmitter {
   }
 
   // 选中代币时拉详情：Agent 曲线走 Reader + fsi，其它走 shrine
-  async refresh(address) {
+  // 同一个币同时只跑一次刷新（刷新变快后，上一次没跑完就别再叠一次）
+  refresh(address) {
+    const t = this.get(address); if (!t) return Promise.resolve();
+    if (t._rfP) return t._rfP;
+    t._rfP = this._refresh(address).finally(() => { t._rfP = null; });
+    return t._rfP;
+  }
+
+  async _refresh(address) {
     const t = this.get(address); if (!t) return;
-    if (t.source === 'gang' && t.gangTrack === 'v2') await this.gangV2Curve(t).catch(() => {});
+    if (t.source === 'gang' && (t.gangTrack === 'v2' || t.gangTrack === 'v3')) await this.gangV2Curve(t).catch(() => {});
+    if (t.source === 'gang' && t.gangTrack === 'v3fair') await this.gangFairState(t).catch(() => {});
     try {
       if (t.market && t.source === 'agent-curve') {
         const [d, trades, ticks] = await Promise.all([this.curve.detail(t.market), fsi.fetchTrades(t.market, 100).catch(() => []), fsi.fetchTicks(t.market, 200).catch(() => [])]);
@@ -420,22 +853,36 @@ export class LiveMarket extends EventEmitter {
         t.trades.sort((a, b) => b.ts - a.ts); if (t.trades.length > 100) t.trades.length = 100;
         t.lastTradeAt = t.trades[0]?.ts || t.lastTradeAt;
         if (t.price) t.mcapUsd = t.price * (t.maxSupply || 1e9) * this.quoteUsd(t);
-        if (t.stage === 'dex') await this.dexCandles(t);
+        if (t.stage === 'dex') await this.dexRefresh(t);
+      } else if (t.source === 'flap-nft') {
+        await this.flapNftTax(t).catch(() => {});
+        await Promise.race([this.flapNftHistory(t, true).then(() => this.emit('detail', t.address)), new Promise((r) => setTimeout(r, 3000))]).catch(() => {});   // 第一次补历史最多等 3 秒，补完再推一次详情
+        if (t.stage === 'curve') await this.applyFlapNftState(t, await this.flapNft.state(t.address));
+        else await this.dexRefresh(t);
       } else if (t.source === 'gang') {
         // 选中时拉一次较长的成交记录画 K 线（5 秒内不重复请求）
-        if (!t.gangAt || Date.now() - t.gangAt > 5000) { t.gangAt = Date.now(); await this.gang.trades(t.address, 200); }
+        // V3 曲线盘：gang.fun 成交接口没有 V3 的成交，K 线 / 成交 / 成交量都从 pad 的链上事件重建（第一次最多等 4 秒，之后只补新区块）
+        // 成交、全部历史、外盘 K 线三件事同时拉，不再一个等一个（进图更快）
+        const jobs = []; let rebuilt = false;
+        if (t.gangTrack === 'v3') jobs.push(Promise.race([this.gangV3History(t).then((n) => { if (n) this.emit('detail', t.address); }), new Promise((r) => setTimeout(r, 4000))]).catch(() => {}));
+        else if (t.stage !== 'dex' && (!t.gangAt || Date.now() - t.gangAt > 1500)) { t.gangAt = Date.now(); jobs.push(this.gang.trades(t.address, 200)); }   // 已发射的不再拉：内盘不会有新成交
         // 第一次选中：拉全部成交，从开盘起重建 K 线（也清掉改单位之前按 BNB 记的旧 K 线，全部是报价币单位）；10 分钟重建一次
-        if (!t.gangFullAt || Date.now() - t.gangFullAt > 600_000) {
+        if (t.gangTrack !== 'v3' && (!t.gangFullAt || Date.now() - t.gangFullAt > 600_000)) {
           t.gangFullAt = Date.now();
-          const rows = await this.gang.history(t.address).catch(() => null);
-          if (rows?.length) { t.candles = []; for (const r of rows) if (r.price > 0) this.pushCandle(t, r.ts, r.price, r.bnb); t._chgAt = 0; }
+          jobs.push(this.gang.history(t.address).catch(() => null).then((rows) => {
+            if (rows?.length) { const k = this.qScale(t); t.candles = []; for (const r of rows) if (r.price > 0) this.pushCandle(t, r.ts, r.price * k, r.bnb * k); t._chgAt = 0; rebuilt = true; }
+          }));
         }
-        // Gang 已迁移的币：内盘成交只到毕业点，当前市值和最新价格来自 DEX；补上 DEX K 线，避免图表停在迁移前。
-        if (t.stage === 'dex') await this.dexCandles(t);
+        if (t.stage === 'dex') jobs.push(this.dexRefresh(t));   // 已发射：接上外盘池子的成交
+        await Promise.all(jobs);
+        if (rebuilt && t.stage === 'dex') await this.dexRefresh(t);   // 历史重建会清空 K 线，外盘部分再并回去
+      } else if (t.source === 'dex') {
+        await this.dexCandles(t);   // 普通外盘代币：只有外盘 K 线（不读链上 Swap 日志，最深的池子不一定是 PancakeSwap V2）
       } else if (t.source === 'four-agent') {
-        // Live events do not recover trades from before this process started.
-        await this.refreshFourHistory(t);
-        if (t.stage === 'dex') await this.dexCandles(t);
+        // 已由链上事件实时更新，不再请求 shrine（经常 429）。有 MySQL 缓存时：用库里从创建起的全部成交重建 K 线和成交列表（重启后也完整），10 分钟一次，第一次最多等 3 秒
+        if (cache.my && (!t.fourHistAt || Date.now() - t.fourHistAt > 600_000)) { t.fourHistAt = Date.now(); await Promise.race([this.fourHistory(t).then(() => this.emit('detail', t.address)), new Promise((r) => setTimeout(r, 3000))]).catch(() => {}); }
+        else if (!cache.my) await this.refreshFourHistory(t);   // 没有缓存：只补最近一段（有范围限制）
+        if (t.stage === 'dex') await this.dexRefresh(t);
       } else {
         const b = await tokenInfo(t.address);
         if (!b.error) {
@@ -487,30 +934,68 @@ export class LiveMarket extends EventEmitter {
   costFor() { return Infinity; }
 
   summary(t) {
-    const qUsd = this.quoteUsd(t); const mcapUsd = t.dexMcapUsd ? t.dexMcapUsd : t.source === 'four-agent' ? (t.price || this.fourP0 || 0) * (t.maxSupply || 1e9) * qUsd : t.mcapUsd;
-    const priceUsd = t.price > 0 && qUsd > 0 ? t.price * qUsd : mcapUsd > 0 ? mcapUsd / (t.maxSupply || 1e9) : 0;
+    const qUsd = this.quoteUsd(t);
+    const priceUsd = t.price > 0 && qUsd > 0 ? t.price * qUsd : (t.dexMcapUsd || t.mcapUsd) > 0 ? (t.dexMcapUsd || t.mcapUsd) / (t.maxSupply || 1e9) : 0;
+    // Gang 的币优先用 gang.fun 的市值（更新比 DexScreener 快）；打开详情后外盘的链上成交会把它更新成实时值
+    const mcapUsd = t.source === 'gang' && t.mcapUsd > 0 ? t.mcapUsd : t.dexMcapUsd ? t.dexMcapUsd : t.source === 'four-agent' ? (t.price || this.fourP0 || 0) * (t.maxSupply || 1e9) * qUsd : t.mcapUsd || (priceUsd > 0 ? priceUsd * (t.maxSupply || 1e9) : 0);
     const liqUsd = t.dexLiqUsd || (t.raised || 0) * qUsd;
     return {
       address: t.address, symbol: t.symbol, name: t.name, platform: t.platform, source: t.source, agentExclusive: !!t.agentExclusive, market: t.market,
-      preset: t.source === 'gang' ? 'Gang（Agent 专属）' : t.source === 'agent-curve' ? 'Flap Agent Curve' : t.platform === 'four' ? (t.agentExclusive ? 'Binance Agent ID Exclusive' : 'Four.meme') : 'Flap',
+      preset: t.source === 'gang' ? 'Gang（Agent 专属）' : t.source === 'agent-curve' ? 'Flap Agent Curve' : t.source === 'dex' ? `外盘代币 · ${t.dexDex || 'DEX'}` : t.source === 'flap-nft' ? (t.nftGate?.plain ? 'Flap · 普通盘' : t.nftGate?.known ? 'Flap · Agent ID 门槛' : 'Flap · NFT 门槛') : t.platform === 'four' ? (t.agentExclusive ? 'Binance Agent ID Exclusive' : 'Four.meme') : 'Flap',
       presetId: t.presetId || '', quote: t.quote, quoteAddress: t.quoteAddress, creator: t.creator, firstBuyer: t.firstBuy?.trader || '', firstBuyerName: t.firstBuy ? this.names.peek(t.firstBuy.trader) : null, vault: t.market || '', createdAt: t.createdAt, officialTest: false,
-      stage: t.stage, price: t.price, priceUsd, mcapUsd, mcapEst: t.source === 'four-agent' && !t.price && !!this.fourP0, liqUsd, quoteUsd: qUsd, raised: t.raised, target: t.target, progress: t.progress || 0,
-      remaining: t.remaining, holders: t.holders, buys: t.buys, sells: t.sells, volume: t.volume, buyTax: t.buyTax, sellTax: t.sellTax,
+      stage: t.stage, price: t.price, priceUsd, mcapUsd,   /* 没有市值但有价格（报价币价格后到）：按现价 × 总量补上 */ mcapEst: t.source === 'four-agent' && !t.price && !!this.fourP0, liqUsd, quoteUsd: this.quoteUsd(t), raised: t.raised, target: t.target, progress: t.progress || 0,
+      remaining: t.remaining, holders: t.holders, buys: t.buys, sells: t.sells, volume: t.volume, dexVol24: t.dexVol24 ?? null, dexBuys24: t.dexBuys24 ?? null, dexSells24: t.dexSells24 ?? null, dexCountMin: t.dexCountMin || 0, buyTax: t.buyTax, sellTax: t.sellTax,
       buyFeePct: t.source === 'four-agent' && t.feeBps == null ? null : this.buyFeePct(t), sellFeePct: this.sellFeePct(t), antiSniperPct: t.antiSniperPct || 0, antiSniper: !!t.antiSniper, lastTradeAt: t.lastTradeAt || 0, realToken: t.realToken !== false,
       chg: this.change(t),
-      image: t.image || null, creatorName: t.creatorName || null, gangTrack: t.gangTrack || null, description: t.description || '', website: t.website || '', twitter: t.twitter || '', telegram: t.telegram || '',
+      image: t.image || null, creatorName: t.creatorName || null, gangTrack: t.gangTrack || null, gangDiv: t.gangDiv || null, gangV3: t.gangV3 || null, gangFair: t.gangFair || null, flapTax: t.flapTax ? { ...t.flapTax, beneficiaryName: t.flapTax.beneficiary ? this.names.peek(t.flapTax.beneficiary) : null } : null, nftGate: t.source === 'flap-nft' && t.stage === 'curve' && t.nftGate && !t.nftGate.removed ? t.nftGate : null, description: t.description || '', website: t.website || '', twitter: t.twitter || '', telegram: t.telegram || '',
     };
   }
 
   // 涨幅（%）：现价对比 开盘 / 5 分钟 / 1 小时 / 24 小时前的价格，按 K 线历史算；历史够不到那个时间点、又不是那之后才开盘的，给 null
   // Gang V2 曲线状态（pad 合约 curves()）：开盘价 = virtualQuote / VT；剩余可售 = 毕业时卖出量 − 已卖出量。单位：报价币 / 个。20 秒缓存
+// Gang 打新币（GangLaunchpad kindOf = 2）：没有曲线，固定价认购 1 万份，卖满就在 PancakeSwap V2 开池。
+  // 进度 = 已售份数 / 10000，已筹 / 目标按每份价格算（报价币单位），价格 = 每份价格 / 每份代币数。launched 后切成外盘（stage = dex + pair），
+  // K 线、成交、买卖都走已毕业币的外盘路径（dexCandles / dex 成交 / baw 兑换）。15 秒缓存
+  async gangFairState(t) {
+    const FAIR_PAD = '0x15cfd2dc8278fb87a1783ef42111618e20874365';   // gang.fun 官方 GangLaunchpad（/api/v3/config 的 pad，owner = gang 多签）
+    if (t._fairAt && Date.now() - t._fairAt < 15_000) return;
+    t._fairAt = Date.now();
+    const I = (this._fairI ||= new ethers.Interface(['function sales(address) view returns (address creator, uint64 progressAt, uint16 capShares, uint16 holdBps, address quote, uint16 sold, bool launched, uint16 mintFeeBps, uint16 exitFeeBps, address gate, uint128 sharePrice, address pair, address refPool, uint16 markSold)', 'function TOKENS_PER_SHARE() view returns (uint256)']));
+    const call = (fn, args = []) => this.provider.call({ to: FAIR_PAD, data: I.encodeFunctionData(fn, args) }).then((r) => I.decodeFunctionResult(fn, r));
+    const [s, tps] = await Promise.all([call('sales', [t.address]), this._fairTps ? [this._fairTps] : call('TOKENS_PER_SHARE')]);
+    this._fairTps = tps[0];
+    if (s.creator === ethers.ZeroAddress) return;
+    t._fair = { sold: Number(s.sold), capShares: Number(s.capShares), sharePrice: Number(ethers.formatEther(s.sharePrice)), tokensPerShare: Number(ethers.formatEther(this._fairTps)), launched: !!s.launched, pair: s.pair === ethers.ZeroAddress ? null : s.pair.toLowerCase(), mintFeeBps: Number(s.mintFeeBps) };
+    this.applyFair(t);
+  }
+  applyFair(t) {
+    const f = t._fair, was = t.stage;
+    t.raised = Math.round(f.sold * f.sharePrice * 1e6) / 1e6; t.target = Math.round(10_000 * f.sharePrice * 1e6) / 1e6; t.remaining = null;
+    t.gangFair = { sold: f.sold, sharesLeft: 10_000 - f.sold, capShares: f.capShares, minWalletsLeft: Math.ceil((10_000 - f.sold) / f.capShares), sharePrice: f.sharePrice, mintPrice: f.sharePrice / f.tokensPerShare, launched: f.launched, mintFeeBps: f.mintFeeBps };
+    if (f.launched) {
+      Object.assign(t, { stage: 'dex', progress: 100, pair: f.pair || t.pair });
+      if (was !== 'dex') { t.migratedAt ||= Date.now(); this.emit('migrate', this.summary(t)); }
+    } else {
+      t.stage = 'curve'; t.progress = f.sold / 100;
+      if (!(t.price > 0)) { t.price = f.sharePrice / f.tokensPerShare; const q = this.quoteUsd(t); if (q) t.mcapUsd = t.price * 1e9 * q; }   // 打新阶段价格固定
+    }
+  }
+
   async gangV2Curve(t) {
-    if (t._v2At && Date.now() - t._v2At < 20_000) return;
+    if (t._v2At && Date.now() - t._v2At < 2_000) return;
     this._gv2 ||= new GangV2(this.provider, null);
     const { c } = await this._gv2.curve(t.address);
     const VT = 1066666666666666666666666667n, vq = BigInt(c.virtualQuote), grad = BigInt(c.gradAmt), sold = BigInt(c.sold);
     const soldAtGrad = VT - (vq * VT + vq + grad - 1n) / (vq + grad);
-    t.launchPrice = Number(ethers.formatEther(vq)) / Number(ethers.formatEther(VT));
+    // 报价币不一定是 18 位（XAUt 是 6 位）：开盘价、已筹、目标都按报价币自己的小数位换算
+    const dec = t._qDec ??= await this._gv2.decimals(c.quote).catch(() => 18), real = BigInt(c.realQuote || 0);
+    t.launchPrice = Number(ethers.formatUnits(vq, dec)) / Number(ethers.formatEther(VT));
+    if (dec !== 18) { t.raised = Number(ethers.formatUnits(real, dec)); t.target = Number(ethers.formatUnits(grad, dec)); }
+    // 恒定乘积：现价 = 报价币储备 / 代币储备。非 18 位报价币每次都用链上价；18 位的只在还没有成交价时补
+    const q = vq + real, tokRes = (vq * VT) / q;
+    if (!c.graduated && tokRes > 0n && (dec !== 18 || !(t.price > 0))) { t.price = Number(ethers.formatUnits(q, dec)) / Number(ethers.formatEther(tokRes)); const u = this.quoteUsd(t); if (u) t.mcapUsd = t.price * 1e9 * u; }
+    if (c.v3) { t.gangV3 = { ...c.v3, trade: V3_TRADE }; t.gangDiv = { taxed: c.taxed && c.v3.dividendBps > 0, taxBps: Math.max(c.v3.buyTaxBps, c.v3.sellTaxBps), vault: null, stats: t.gangDiv?.stats || null }; }   // V3：毕业后外盘收税，分红比例 > 0 才分红
+    else if (t.gangDiv?.taxed == null) t.gangDiv = { taxed: !!c.taxed, taxBps: c.taxed ? 100 : 0, vault: null, stats: null };   // 新盘接口还没收录时，按合约 curves().taxed 先判断分红
     t._v2Rem = c.graduated ? 0 : Math.max(0, Number(ethers.formatEther(soldAtGrad > sold ? soldAtGrad - sold : 0n)));
     t.remaining = t._v2Rem; t._v2At = Date.now(); t._chgAt = 0;
   }
@@ -521,9 +1006,11 @@ export class LiveMarket extends EventEmitter {
     this._all ||= new Map(); const c = this._all.get(t.address);
     if (c && Date.now() - c.at < 60_000) return c;
     let list = [], complete = true;
-    if (t.source === 'gang') list = await this.gang.history(t.address, 20000);
+    if (t.source === 'gang' && t.gangTrack === 'v3') { await this.gangV3History(t); list = (t._v3Hist?.rows || []).map((x) => this.v3Row(t, x)); }
+    else if (t.source === 'gang' && t.gangTrack !== 'v3fair') { const k = this.qScale(t); list = (await this.gang.history(t.address, 20000)).map((x) => (k === 1 ? x : { ...x, price: x.price * k, bnb: x.bnb * k })); }
     else if (t.source === 'four-agent') list = await this.four.tokenTrades(t.address);
-    else if (t.market) { list = await fsi.fetchTrades(t.market, 5000); complete = list.length < 9000; }
+    else if (t.source === 'flap-nft') list = (await this.flapNft.history(t.address, true).catch(() => this.flapNft.trades(t.address))).map((x) => ({ ts: x.ts, side: x.side, bnb: x.bnb, tokens: x.tokens, price: x.price, trader: x.trader, tx: x.tx }));   // 门槛盘：Portal 内盘成交（从创建起）
+    else if (t.market) { list = await this.fsiHistory(t); complete = list.length < 9000; }
     list = [...new Map(list.map((x) => [`${x.tx}:${x.side}:${x.tokens}`, x])).values()].sort((a, b) => b.ts - a.ts).slice(0, 20000);
     for (const x of list) { x.name ||= this.names.peek(x.trader); x.usd = (x.bnb || 0) * this.quoteUsd(t); }
     const v = { at: Date.now(), list, complete };
@@ -564,6 +1051,43 @@ export class LiveMarket extends EventEmitter {
     if (qUsd > 0) this._ts.set(key, { at: Date.now(), v }); return v;   // 报价币价格还没拿到时不缓存，免得美元一直显示 0
   }
 
+  // 持有人（详情页底部「持有人」，HOLDERS_FEATURE）：这个币的全部成交按地址汇总（路由买卖已经记到真实发起人），按持仓从大到小排。
+  // 持仓先按买卖差估算，再给前 60 名读链上 balanceOf（Agent 曲线盘没有链上代币，只能用买卖差）；两者对不上 = 有转入 / 转出，xfer 标出来。
+  // 只统计本程序拿得到的成交：内盘（Flap / Four / Gang 曲线、门槛盘）从开盘起；已迁移的币外盘（DEX）成交可能不全。金额是报价币单位。60 秒缓存
+  async holders(address) {
+    const t = this.get(address); if (!t) return null;
+    this._hd ||= new Map(); const c = this._hd.get(t.address); if (c && Date.now() - c.at < 60_000) return c.v;
+    const { list, complete } = await this.allTrades(t);
+    const m = new Map();
+    for (const x of list) {
+      const k = String(x.trader || '').toLowerCase(); if (!/^0x[0-9a-f]{40}$/.test(k)) continue;
+      let r = m.get(k); if (!r) m.set(k, (r = { trader: x.trader, name: null, buys: 0, sells: 0, bT: 0, bQ: 0, sT: 0, sQ: 0, first: 0, last: 0 }));
+      if (x.side === 'buy') { r.buys++; r.bT += Number(x.tokens) || 0; r.bQ += Number(x.bnb) || 0; } else { r.sells++; r.sT += Number(x.tokens) || 0; r.sQ += Number(x.bnb) || 0; }
+      r.name ||= x.name || null; if (!r.first || x.ts < r.first) r.first = x.ts; if (x.ts > r.last) r.last = x.ts;
+    }
+    const rows = [...m.values()]; for (const r of rows) { r.net = Math.max(0, r.bT - r.sT); r.hold = r.net; r.holdSrc = 'trades'; }
+    rows.sort((a, b) => b.net - a.net);
+    let checked = 0;
+    if (t.source !== 'agent-curve') {
+      const cand = rows.slice(0, 60).filter((r) => r.net > 0), i = new ethers.Interface(['function balanceOf(address) view returns (uint256)']);
+      for (let j = 0; j < cand.length; j += 10) await Promise.all(cand.slice(j, j + 10).map(async (r) => { try { r.hold = Number(ethers.formatEther(i.decodeFunctionResult('balanceOf', await this.provider.call({ to: t.address, data: i.encodeFunctionData('balanceOf', [r.trader]) }))[0])); r.holdSrc = 'chain'; checked++; } catch { /* 读不到就用买卖差 */ } }));
+    }
+    const supply = t.maxSupply || 1e9, price = t.price || 0, qUsd = this.quoteUsd(t), dust = supply * 1e-9;
+    const out = rows.map((r) => {
+      const avgBuy = r.bT ? r.bQ / r.bT : null, realized = avgBuy != null ? r.sQ - avgBuy * Math.min(r.sT, r.bT) : r.sQ, holdQ = r.hold * price, unrealized = avgBuy != null ? holdQ - avgBuy * r.hold : holdQ;   // 和交易者抽屉同一个算法
+      return { trader: r.trader, name: this.names.peek(r.trader) || r.name, hold: r.hold, net: r.net, holdSrc: r.holdSrc, xfer: r.holdSrc === 'chain' && Math.abs(r.hold - r.net) > Math.max(1, 0.01 * Math.max(r.hold, r.net)),
+        pctSupply: (r.hold / supply) * 100, buys: r.buys, sells: r.sells, boughtTokens: r.bT, boughtQ: r.bQ, soldTokens: r.sT, soldQ: r.sQ, avgBuy, buyMcUsd: avgBuy != null && qUsd ? avgBuy * supply * qUsd : null,
+        holdQ, realized, unrealized, total: realized + unrealized, pct: r.bQ ? ((realized + unrealized) / r.bQ) * 100 : null, first: r.first, last: r.last };
+    });
+    const holders = out.filter((r) => r.hold > dust).sort((a, b) => b.hold - a.hold), exited = out.filter((r) => r.hold <= dust).sort((a, b) => b.total - a.total);
+    const coverage = t.source === 'agent-curve' ? 'Agent 曲线盘没有链上代币余额，持仓全部按买卖差估算'
+      : t.stage !== 'curve' ? '已迁移：只统计本程序拿到的成交（内盘从开盘起），外盘（DEX）买卖可能不全；前 60 名的持仓以链上余额为准' : '内盘成交从开盘起全部统计';
+    const v = { address: t.address, symbol: t.symbol, quote: t.quote || 'BNB', qUsd, qBnb: this.bnbUsd ? qUsd / this.bnbUsd : 0, price, supply, stage: t.stage, source: t.source,
+      complete, trades: list.length, traders: rows.length, holderCount: holders.length, exitedCount: exited.length, checked, coverage, holders: holders.slice(0, 300), exited: exited.slice(0, 200), at: Date.now() };
+    if (qUsd > 0) { this._hd.set(t.address, { at: Date.now(), v }); if (this._hd.size > 20) this._hd.delete(this._hd.keys().next().value); }
+    return v;
+  }
+
   change(t) {
     const now = Date.now();
     if (t._chg && now - t._chgAt < 5000 && t._chgP === t.price) return t._chg;
@@ -590,10 +1114,15 @@ export class LiveMarket extends EventEmitter {
   list() { return [...this.tokens.values()].map((t) => this.summary(t)); }
   // 成交记录带上钱包域名（只读缓存，没有就是 null）
   named(rows) { return rows.map((r) => ({ ...r, name: r.name || this.names.peek(r.trader) })); }
-  detail(a) { const t = this.get(a); if (!t) return null; return { ...this.summary(t), candles: t.candles.slice(-1800), historyState: t.historyState || (t.lastError ? 'error' : null), historyPartial: !!t.historyPartial, trades: this.named(t.trades.slice(0, 60)) }; }
+  detail(a) { const t = this.get(a); if (!t) return null; return { ...this.summary(t), candles: compactCandles(t.candles, 5000), historyState: t.historyState || (t.lastError ? 'error' : null), historyPartial: !!t.historyPartial, historyNote: t.dexNote || '', trades: this.named(t.trades.slice(0, 60)) }; }
 
   netStatus() {
     const l = this.feeds.status.launch;
-    return { wss: l.connected ? l.rttMs ?? 0 : null, rpc: this.rpcError ? null : this.rpcMs, rpcError: this.rpcError, rpcNode: { ...this.provider.info, four: nodeName(this.four.status?.rpcActive || this.four.status?.rpc), curve: nodeName(this.curve.status?.rpc) }, shrine: this.feeds.status, curve: this.curve.status, four: this.four.status, gang: this.gang.status, gangChain: { ...this.gangChain.status, recent: (this.gangLat || []).slice(0, 8) } };
+    // 顶栏「链上订阅」：Flap / Four / Gang 三个 WebSocket 订阅都正常 = ok；部分正常 = partial；都断 = down。shrine 只是补充来源，不影响这个状态
+    const subs = [this.flapChain.status, this.four.ws || {}, this.gangChain.status], upN = subs.filter((x) => x.connected).length;
+    const wssState = upN === subs.length ? 'ok' : upN ? 'partial' : 'down';
+    const chainSubs = { flap: { wss: this.flapChain.status.wss, connected: this.flapChain.status.connected, lastLogAt: this.flapChain.status.lastLogAt, trades: this.flapChain.status.trades },
+      four: { wss: this.four.ws?.wss, connected: !!this.four.ws?.connected, lastLogAt: this.four.ws?.lastLogAt }, gang: { wss: this.gangChain.status.wss, connected: this.gangChain.status.connected, lastLogAt: this.gangChain.status.lastLogAt } };
+    return { wss: null, wssState, chainSubs, rpc: this.rpcError ? null : this.rpcMs, rpcError: this.rpcError, rpcNode: { ...this.tradeProvider.info, read: nodeName(this.provider.lastUrl || this.provider.urls[0]), gangWs: this.gangChain.status.wss || null, fourWs: this.four.ws?.wss || null, four: nodeName(this.four.status?.rpcActive || this.four.status?.rpc), curve: nodeName(this.curve.status?.rpc) }, shrine: this.feeds.status, curve: this.curve.status, four: this.four.status, gang: this.gang.status, gangChain: { ...this.gangChain.status, recent: (this.gangLat || []).slice(0, 8) } };
   }
 }

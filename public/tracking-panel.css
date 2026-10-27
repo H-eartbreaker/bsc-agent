@@ -1,0 +1,124 @@
+/* Wallet tracking shares the terminal's continuous, compact workspace. */
+#walletTrackingPanel { color: var(--text); }
+.wallet-tracking-toggle { display: flex; align-items: center; gap: 6px; white-space: nowrap; padding: 6px 9px; border: 1px solid var(--line2); border-radius: 6px; color: var(--text); background: var(--panel2); }
+.wallet-tracking-toggle[aria-expanded=true] { border-color: var(--y); color: var(--y); }
+#walletTrackingCount, #wtCount { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 11px; }
+.wt-panel { position: fixed; z-index: 55; right: 0; top: calc(var(--headerH) + var(--favH, 0px)); bottom: var(--footerH); width: 350px; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line2); color: var(--text); }
+.wt-header { display: flex; align-items: center; gap: 5px; padding: 11px 12px; border-bottom: 1px solid var(--line); flex: none; }
+.wt-header > b { flex: 1; white-space: nowrap; }
+.wt-header button { min-width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 4px 6px; border-radius: 6px; color: var(--muted); }
+.wt-header button:hover { background: var(--panel2); color: var(--text); }
+.wt-content { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.wt-tabs { display: flex; gap: 18px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+.wt-tabs button { padding: 10px 0 8px; color: var(--muted); border-bottom: 2px solid transparent; }
+.wt-tabs button.active { color: var(--text); border-bottom-color: var(--y); }
+.wt-filters { display: flex; gap: 10px; align-items: center; padding: 10px 12px; background: var(--panel2); }
+.wt-filters[hidden] { display: none; }
+.wt-filters select { min-width: 0; flex: 1; height: 30px; background: var(--panel); color: var(--text); border: 1px solid var(--line2); border-radius: 4px; }
+.wt-filters label { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
+.wt-filters input { width: 55px; height: 30px; padding: 4px; background: var(--panel); border: 1px solid var(--line2); border-radius: 4px; color: var(--text); }
+.wt-status { padding: 9px 12px; font-size: 12px; color: var(--y); border-bottom: 1px solid var(--line); }
+.wt-body { overflow: auto; flex: 1; min-height: 0; overscroll-behavior: contain; }
+.wt-event { padding: 13px 12px; border-bottom: 1px solid var(--line); }
+.wt-event:hover { background: var(--panel2); }
+.wt-event-top, .wt-event-bottom { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.wt-action { font-size: 11px; flex: none; }
+.wt-event-top > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--y); }
+.wt-event-top strong { margin-left: auto; white-space: nowrap; font-size: 13px; font-variant-numeric: tabular-nums; }
+.wt-event small { font-size: 11px; font-weight: 400; color: var(--muted); }
+.wt-event-bottom { margin-top: 5px; font-size: 11px; color: var(--muted); }
+.wt-event-bottom button { color: var(--text); font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 110px; text-align: left; }
+.wt-event-bottom button:hover { color: var(--g); }
+.wt-event-bottom time { margin-left: auto; white-space: nowrap; }
+.wt-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); }
+.wt-footer button, .wt-empty button, .wt-wallet button, .wt-copy-note button { color: var(--y); padding: 5px; }
+.wt-empty { padding: 36px 22px; text-align: center; }
+.wt-empty b { font-size: 14px; }
+.wt-empty p { font-size: 12px; color: var(--muted); line-height: 1.8; margin: 10px 0; }
+.wt-wallet { display: flex; align-items: center; gap: 10px; padding: 14px 12px; border-bottom: 1px solid var(--line); }
+.wt-wallet > div { flex: 1; min-width: 0; }
+.wt-wallet b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wt-wallet small { display: block; color: var(--muted); font-size: 11px; }
+.wt-copy-note { padding: 10px 12px; color: var(--muted); font-size: 11px; display: flex; justify-content: space-between; align-items: center; }
+.wt-task { padding: 12px; border-bottom: 1px solid var(--line); }
+.wt-task > b { display: block; overflow-wrap: anywhere; }
+.wt-task > div { display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 11px; margin-top: 4px; }
+.wt-log-title { font-size: 12px; margin: 18px 12px 8px; }
+.wt-log { padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 11px; display: flex; flex-wrap: wrap; gap: 8px; }
+.wt-log span { flex-basis: 100%; color: var(--muted); overflow-wrap: anywhere; }
+.wt-log time, .wt-note { color: var(--muted); }
+.wt-note { margin: 8px 12px 16px; font-size: 12px; }
+.wt-panel.floating { top: auto; left: auto; right: 24px; bottom: 48px; width: 380px; height: 530px; max-height: calc(100dvh - 32px); max-width: calc(100vw - 16px); border: 0; border-radius: 12px; background: var(--panel2); box-shadow: 0 14px 42px #0006; overflow: hidden; }
+.wt-panel.floating .wt-header { cursor: move; touch-action: none; }
+.wt-panel.minimized { top: auto; bottom: 36px; right: 12px; height: auto; width: 340px; border: 1px solid var(--line2); border-radius: 8px; }
+.wt-panel.minimized .wt-content { display: none; }
+.tracking-docked main.layout, .tracking-docked #pulse, .tracking-docked #hold, .tracking-docked #track { margin-right: 350px; }
+.follow-wallet { margin-left: 7px; padding: 3px 6px; border: 1px solid var(--line2); border-radius: 4px; font-size: 11px; color: var(--y); white-space: nowrap; }
+.follow-wallet.is-followed { color: var(--g); }
+.follow-wallet:hover { border-color: currentColor; background: var(--panel2); }
+.trd-follow-actions { display: flex; gap: 8px; margin-bottom: 12px; }
+.trd-follow-actions button { padding: 7px 10px; border: 1px solid var(--line2); border-radius: 6px; color: var(--y); }
+.track-section-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.track-section-tabs button { padding: 9px 0; color: var(--muted); border-bottom: 2px solid transparent; }
+.track-section-tabs button.active { color: var(--text); border-bottom-color: var(--y); }
+.track-target [data-track-copy] { color: var(--y); white-space: nowrap; }
+.track-target [data-track-edit] { font-size: 11px; color: var(--muted); }
+.track-table [data-track-token] { color: var(--text); font-weight: 600; }
+.track-head { flex-wrap: wrap; }
+.track-head [data-open-tracking] { padding: 6px 10px; border: 1px solid var(--line2); border-radius: 6px; color: var(--y); }
+.track-side h3 { margin: 16px 0 7px; font-size: 12px; color: var(--muted); }
+.track-main { overflow-x: auto; }
+.copy-panel.hidden { display: none; }
+#trackSummary { font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+@media (min-width: 901px) and (max-width: 1500px) {
+  .tracking-docked main.layout { --leftW: 230px; grid-template-columns: var(--leftW) minmax(0,1fr) 280px; }
+  .tracking-docked main.layout .center { min-width: 0; }
+}
+@media (max-width: 1200px) {
+  .wt-panel { width: 320px; }
+  .tracking-docked main.layout, .tracking-docked #pulse, .tracking-docked #hold, .tracking-docked #track { margin-right: 0; }
+}
+
+.wt-log > strong { overflow-wrap: anywhere; color: var(--text); }
+.wt-log a { color: var(--y); text-decoration: underline; text-underline-offset: 3px; }
+#copyLog .wt-log { padding: 10px 0; }
+.wt-log .wt-log-context { color: var(--text); }
+.copy-strategy-form { display:grid; gap:16px; padding:16px 0; }
+.copy-editor-head,.copy-editor-foot { display:flex; align-items:center; gap:14px; }
+.copy-editor-head > b { font-size:15px; }
+.copy-editor-head button { margin-left:auto; color:var(--muted); padding:5px 9px; border:1px solid var(--line2); }
+.copy-strategy-form fieldset { margin:0; padding:14px 16px; border:1px solid var(--line); min-width:0; }
+.copy-strategy-form legend { padding:0 8px; color:var(--text); font-weight:600; }
+.copy-form-grid { display:grid; grid-template-columns:repeat(3,minmax(160px,1fr)); gap:12px 18px; }
+.copy-form-grid > label { display:grid; gap:6px; font-size:12px; color:var(--muted); }
+.copy-form-grid input,.copy-form-grid select { width:100%; height:34px; min-width:0; border:1px solid var(--line2); background:var(--panel2); color:var(--text); border-radius:6px; padding:0 9px; }
+.copy-form-checks { display:flex; gap:18px; flex-wrap:wrap; margin:12px 0 0; }
+.copy-form-checks label,.copy-mode-choice { display:inline-flex; align-items:center; gap:6px; }
+.copy-mode-choice { margin:14px 0 0; color:var(--y); }
+.copy-strategy-form p { margin:10px 0 0; font-size:12px; }
+.copy-task-card { padding:16px; border:1px solid var(--line2); background:var(--panel); }
+.copy-task-card > header { display:flex; align-items:center; justify-content:space-between; gap:18px; border-bottom:1px solid var(--line); padding-bottom:12px; }
+.copy-task-card header > div:first-child { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+.copy-task-card h3 { margin:0; font-size:16px; }
+.copy-task-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:18px; margin:14px 0; }
+.copy-task-summary dt { font-size:12px; color:var(--muted); margin-bottom:6px; }
+.copy-task-summary dd { margin:0; font-size:13px; overflow-wrap:anywhere; }
+.copy-task-summary small { display:block; font-size:11px; color:var(--muted); margin-top:5px; }
+.copy-task-card summary { color:var(--y); cursor:pointer; padding:8px 0; }
+.copy-task-card details > p { font-size:12px; }
+.wt-wallet button { flex:none; }
+
+/* 悬浮窗：四个角拖动改大小（大小会记住） */
+.wt-rs { display: none; position: absolute; width: 16px; height: 16px; z-index: 3; touch-action: none; }
+.wt-panel.floating .wt-rs { display: block; }
+.wt-rs.nw { left: 0; top: 0; cursor: nwse-resize; } .wt-rs.se { right: 0; bottom: 0; cursor: nwse-resize; }
+.wt-rs.ne { right: 0; top: 0; cursor: nesw-resize; } .wt-rs.sw { left: 0; bottom: 0; cursor: nesw-resize; }
+.wt-rs.se::after { content: ''; position: absolute; right: 4px; bottom: 4px; width: 7px; height: 7px; border-right: 2px solid rgba(255, 255, 255, .3); border-bottom: 2px solid rgba(255, 255, 255, .3); }
+
+/* 固定到左边 */
+.wt-panel.dock-left:not(.floating) { right: auto; left: 0; border-left: 0; border-right: 1px solid var(--line2); }
+.tracking-docked-left main.layout, .tracking-docked-left #pulse, .tracking-docked-left #hold, .tracking-docked-left #track { margin-left: 350px; }
+@media (max-width: 760px) { .tracking-docked-left main.layout, .tracking-docked-left #pulse, .tracking-docked-left #hold, .tracking-docked-left #track { margin-left: 0; } }
+/* 左 / 右 / 悬浮 三个小按钮 */
+.wt-modes { display: inline-flex; gap: 2px; margin: 0 4px; }
+.wt-modes button { opacity: .55; } .wt-modes button:hover { opacity: 1; } .wt-modes button.on { opacity: 1; color: var(--y, #f0b90b); }

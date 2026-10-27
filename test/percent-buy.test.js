@@ -63,3 +63,14 @@ test('percentage sizing preserves the underlying preview failure', async () => {
   assert.equal(q.bnb, 0);
   assert.equal(q.error, '流动性不足');
 });
+
+test('multi-wallet percentage buys use each wallet quote and cancel if inputs change during the second quote', async () => {
+  for (const change of [false, true]) {
+    let count = 0;
+    const f = fixture(async () => { count++; if (change && count === 2) f.nodes['#amount'].value = '2'; return { bnb: count === 1 ? 0.12 : 0.25 }; });
+    f.state.selWallets.add('wallet2'); await f.submit();
+    const orders = f.calls.filter(c => c.url === '/api/order');
+    assert.equal(count, 2);
+    assert.deepEqual(orders.map(o => o.body.amount), change ? [] : [0.12, 0.25]);
+  }
+});

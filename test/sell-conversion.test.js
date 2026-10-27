@@ -13,7 +13,7 @@ const pIface = new ethers.Interface(['function sellAll(address,uint256) returns(
 const pad = new ethers.Interface(['function sell(address,uint256,uint256)']);
 
 function fixture(platform, scenario) {
-  const submissions = [], polls = [];
+  const submissions = [], polls = [], sends = [];
   const baw = {
     async marketSwap(args) {
       submissions.push(args);
@@ -28,26 +28,35 @@ function fixture(platform, scenario) {
     },
   };
   const source = readFileSync(new URL(platform === 'flap' ? '../engine/live/portal.js' : '../engine/live/gangV2Pads.js', import.meta.url), 'utf8');
-  const start = source.indexOf('  async sell('), end = source.indexOf('\n  }\n}', start) + 4;
-  assert.ok(start > 0 && end > start);
+  // 按花括号配平截出这些方法（后面再加别的方法也不影响）；sell 里调用的 swapBack / notGraduated 一起带上
+  const method = (name) => {
+    let start = source.indexOf('  async ' + name + '('); if (start < 0) start = source.indexOf('  ' + name + '(');
+    assert.ok(start >= 0, name + ' 不见了');
+    let depth = 0, i = source.indexOf(') {', start) + 2;
+    for (; i < source.length; i++) { if (source[i] === '{') depth++; else if (source[i] === '}' && --depth === 0) break; }
+    return source.slice(start, i + 1);
+  };
+  const methodsSrc = ['sell', 'swapBack', ...(platform === 'flap' ? [] : ['notGraduated'])].map(method).join(',\n');
   const context = vm.createContext({
     ethers: { ...ethers, Contract: class { async decimals() { return 18; } async balanceOf() { return 90n * 10n ** 18n; } } },
+    assertLiquid: async address => { assert.equal(address, quote); if (scenario === 'low-liquidity') throw Error('流动性低于门槛'); },
     baw, pIface, pad, PORTAL: venue, BNB_NATIVE: ethers.ZeroAddress,
     ERC20_ABI: [], isBnbQuote: () => false, isWbnb: () => false,
     minOut: (v) => v * 97n / 100n,
+    ONDO_RE: /(?!)/, viaUsdt: () => false, markViaUsdt() {}, USDT: '0x5555555555555555555555555555555555555555',
   });
-  const target = vm.runInContext('({' + source.slice(start, end) + '})', context);
+  const target = vm.runInContext('({' + methodsSrc + '})', context);
   let balanceReads = 0;
   Object.assign(target, {
     provider: { call: async () => ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [10n ** 18n]) },
     sharesOf: async () => 10n ** 18n, minShares: v => v * 97n / 100n,
     received: async () => 10n ** 18n,
-    send: async () => sellTx,
+    send: async () => { sends.push(sellTx); return sellTx; },
     curve: async () => ({ pad: venue, c: {} }), quoteToken: () => quote,
     balanceOf: async (address) => address === token ? 10n ** 18n : (++balanceReads === 1 ? 90n : 91n) * 10n ** 18n,
-    ensureAllowance: async () => null, sellQuote: () => ({ out: 10n ** 18n }), decimals: async () => 18,
+    needsUsdt: async () => false, ensureAllowance: async () => null, sellQuote: () => ({ out: 10n ** 18n }), decimals: async () => 18,
   });
-  return { submissions, polls, run: toBnb => target.sell({ wallet, token, market: venue, quoteAddress: quote, quoteSym: 'Q', pct: 100, slippage: 3, step() {}, toBnb }) };
+  return { submissions, polls, sends, run: toBnb => target.sell({ wallet, token, market: venue, quoteAddress: quote, quoteSym: 'Q', pct: 100, slippage: 3, step() {}, toBnb }) };
 }
 
 for (const platform of ['flap', 'gang']) {
@@ -71,3 +80,10 @@ for (const platform of ['flap', 'gang']) {
     assert.equal(f.submissions.length, 0); assert.equal(r.txHash, sellTx); assert.equal(r.expected, null);
   });
 }
+
+// 新增的流动性保护必须在内盘卖出和报价币兑换之前失败。
+test('Gang rejects low-liquidity quote currency before sending a sell or conversion', async () => {
+  const f = fixture('gang', 'low-liquidity');
+  await assert.rejects(f.run(true), /流动性低于门槛/);
+  assert.equal(f.submissions.length, 0); assert.equal(f.polls.length, 0); assert.equal(f.sends.length, 0);
+});

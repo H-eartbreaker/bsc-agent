@@ -18,7 +18,7 @@ const f18 = (x, d = 18) => Number(ethers.formatUnits(x, d));
 export class AgentCurve extends EventEmitter {
   constructor(provider, pollMs = 3000) {
     super();
-    this.reader = new ethers.Contract(READER, ABI, provider);
+    this.provider = provider; this.reader = new ethers.Contract(READER, ABI, provider);
     this.pollMs = pollMs; this.seen = new Map(); this.tax = new Map(); this.cold = true;
     this.status = { connected: false, total: 0, lastError: null, lastPollMs: 0 };
   }
@@ -31,7 +31,9 @@ export class AgentCurve extends EventEmitter {
     catch (e) {
       this.fails = (this.fails || 0) + 1; this.status.lastError = e.shortMessage || e.message;
       if (this.fails >= 2) this.status.connected = false;   // 单次偶发错误（missing response 等）不报红
-      if (this.fails % 2 === 0) { const u = FALLBACK[(this.rpcIdx = ((this.rpcIdx || 0) + 1) % FALLBACK.length)]; this.reader = new ethers.Contract(READER, ABI, new ethers.JsonRpcProvider(u, 56, { staticNetwork: true })); this.status.rpc = u; }
+      // 传进来的 provider 本身会在多个节点间切换（含付费节点兜底），不再换成单个公共节点：换过去之后限流就再也切不回来（Reader 一直报 exceeded maximum retry limit）。
+      // 只有没传 FailoverProvider 时才按 FALLBACK 轮换
+      if (this.fails % 2 === 0 && !this.provider?.urls) { const u = FALLBACK[(this.rpcIdx = ((this.rpcIdx || 0) + 1) % FALLBACK.length)]; this.reader = new ethers.Contract(READER, ABI, new ethers.JsonRpcProvider(u, 56, { staticNetwork: true })); this.status.rpc = u; }
     }
     finally { if (this.status.lastError === null) this.fails = 0; this.busy = false; this.status.lastPollMs = Date.now() - t0; }
   }

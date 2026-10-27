@@ -4,6 +4,7 @@ import { ethers } from 'ethers';
 import { PORTAL, FACTORY, ZERO, BNB_NATIVE } from './config.js';
 import * as baw from './baw.js';
 import { waitForContractConfirmation } from './app-confirmation.js';
+import { USDT, ONDO_RE, viaUsdt, markViaUsdt, waitReceived } from './quoteRoutes.js';
 import { capFor, capLabel, sendApproval } from './approvals.js';
 
 const PORTAL_ABI = [
@@ -28,8 +29,8 @@ export const isBnbQuote = (a) => !a || a === ZERO || a.toLowerCase() === BNB_NAT
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class Portal {
-  constructor(provider) {
-    this.provider = provider;
+  constructor(provider, readProvider = provider) {
+    this.provider = provider; this.read = readProvider;   // read：定时扫描用的只读调用（领取前模拟、份额），走公共节点
     this.confirmPending = waitForContractConfirmation;
     this.portal = new ethers.Contract(PORTAL, PORTAL_ABI, provider);
     this.factory = new ethers.Contract(FACTORY, ['function marketOfToken(address token) view returns (address)'], provider);
@@ -45,12 +46,12 @@ export class Portal {
   minShares(shares, slippagePct) { const bps = BigInt(Math.min(9999, Math.round(slippagePct * 100))); return (shares * (10000n - bps)) / 10000n; }
 
   async sharesOf(market, wallet) {
-    return mIface.decodeFunctionResult('sharesOf', await this.provider.call({ to: market, data: mIface.encodeFunctionData('sharesOf', [wallet]) }))[0];
+    return mIface.decodeFunctionResult('sharesOf', await this.read.call({ to: market, data: mIface.encodeFunctionData('sharesOf', [wallet]) }))[0];
   }
 
   // 迁移（发射）后把曲线份额领成真正的代币：Portal.claim(market)，返回领到的代币数量
   async previewClaim(market, wallet) {
-    const r = await this.provider.call({ from: wallet, to: PORTAL, data: pIface.encodeFunctionData('claim', [market]) });
+    const r = await this.read.call({ from: wallet, to: PORTAL, data: pIface.encodeFunctionData('claim', [market]) });
     return pIface.decodeFunctionResult('claim', r)[0];
   }
   async claim({ wallet, market, step }) {
@@ -118,7 +119,9 @@ export class Portal {
   }
 
   // 真实买入。BNB 底池：Portal.buy（原子）。其他底池：BNB→报价币 → approve → buyWithQuote（多笔交易，非原子）
-  async buy({ wallet, market, quoteAddress, quoteSym, amountBnb, slippage, step }) {
+  // payQuote：BNB 不够、改用钱包里现有报价币直接付时的报价币数量（liveTrader.fundingPlan 算的），跳过 BNB→报价币
+  // quoteRate：1 BNB ≈ 多少报价币（liveTrader 传入）。钱包里已有的报价币先用上，够就不换；不够只用 BNB 换差额
+  async buy({ wallet, market, quoteAddress, quoteSym, amountBnb, slippage, step, payQuote = null, quoteRate = null }) {
     const hashes = [];
     if (isBnbQuote(quoteAddress)) {
       const value = ethers.parseEther(String(amountBnb));
@@ -129,22 +132,37 @@ export class Portal {
     }
     const qc = new ethers.Contract(quoteAddress, ERC20_ABI, this.provider);
     const dec = Number(await qc.decimals().catch(() => 18));
-    const before = await qc.balanceOf(wallet);
-    const t = Date.now();
-    const sw = await baw.marketSwap({ fromTokenQty: String(amountBnb), fromToken: BNB_NATIVE, toToken: quoteAddress, slippage });
-    if (!sw.orderId) throw new Error(`BNB→${quoteSym} 兑换没有返回 orderId`);
-    step(`BNB→${quoteSym} 已提交 ${sw.orderId}`, Date.now() - t);
-    const o = await baw.pollOrder(sw.orderId);
-    if (o?.status !== 'FINISHED') throw new Error(`BNB→${quoteSym} 兑换${o?.status === 'FAILED' ? '失败' : '未完成（仍在处理，请在钱包里查看）'}，订单 ${sw.orderId}`);
-    if (o.txHash) hashes.push(o.txHash);
-    const got = await this.received(qc, wallet, before);
-    if (got <= 0n) throw new Error(`BNB→${quoteSym} 已完成，但余额没有增加，停止后续步骤`);
-    step(`收到 ${ethers.formatUnits(got, dec)} ${quoteSym}`, Date.now() - t);
+    let got;
+    if (payQuote != null) {
+      const have = await qc.balanceOf(wallet), want = ethers.parseUnits(Number(payQuote).toFixed(Math.min(12, dec)), dec);
+      got = want < have ? want : have; if (got <= 0n) throw new Error(`钱包里没有 ${quoteSym}`);
+      step(`直接用钱包里的 ${ethers.formatUnits(got, dec)} ${quoteSym}`, 0);
+    } else {
+      const before = await qc.balanceOf(wallet);
+      const need = quoteRate > 0 ? ethers.parseUnits((Number(amountBnb) * quoteRate).toFixed(Math.min(12, dec)), dec) : 0n;
+      if (need > 0n && before >= need) { got = need; step(`钱包里已有足够 ${quoteSym}，直接使用 ${ethers.formatUnits(need, dec)}`, 0); }
+      else {
+      const short = need > 0n && before > 0n ? Math.min(Number(amountBnb), Number(amountBnb) * Number(need - before) / Number(need) * 1.03) : Number(amountBnb);
+      const qty = short.toFixed(18).replace(/\.?0+$/, '');
+      if (short < Number(amountBnb)) step(`钱包里有 ${ethers.formatUnits(before, dec)} ${quoteSym}，不够 ${ethers.formatUnits(need, dec)}，用 ${qty} BNB 换差额`, 0);
+      const t = Date.now();
+      const sw = await baw.marketSwap({ fromTokenQty: qty, fromToken: BNB_NATIVE, toToken: quoteAddress, slippage });
+      if (!sw.orderId) throw new Error(`BNB→${quoteSym} 兑换没有返回 orderId`);
+      step(`BNB→${quoteSym} 已提交 ${sw.orderId}`, Date.now() - t);
+      const o = await baw.pollOrder(sw.orderId);
+      if (o?.status !== 'FINISHED') throw new Error(`BNB→${quoteSym} 兑换${o?.status === 'FAILED' ? '失败' : '未完成（仍在处理，请在钱包里查看）'}，订单 ${sw.orderId}`);
+      if (o.txHash) hashes.push(o.txHash);
+      got = await this.received(qc, wallet, before);
+      if (got <= 0n) throw new Error(`BNB→${quoteSym} 已完成，但余额没有增加，停止后续步骤`);
+      step(`收到 ${ethers.formatUnits(got, dec)} ${quoteSym}`, Date.now() - t);
+      if (short < Number(amountBnb)) got += before;   // 加上钱包里原有的那部分
+      }
+    }
     for (const spender of [PORTAL, market]) await this.ensureAllowance({ wallet, token: quoteAddress, spender, amount: got, sym: quoteSym, step });
     const q = await this.quoteBuy(market, wallet, got);
     step(`Portal.quoteBuy ${(+ethers.formatEther(q.shares)).toFixed(0)} 份`, 0);
     hashes.push(await this.send({ wallet, to: PORTAL, inputData: pIface.encodeFunctionData('buyWithQuote', [market, got, this.minShares(q.shares, slippage)]), label: 'Portal.buyWithQuote', step }));
-    return { venue: `BNB→${quoteSym}→Portal.buyWithQuote（非原子）`, expected: +ethers.formatEther(q.shares), quoteSpent: +ethers.formatUnits(got, dec), txHash: hashes.at(-1), hashes };
+    return { venue: payQuote != null ? `钱包 ${quoteSym}→Portal.buyWithQuote` : `BNB→${quoteSym}→Portal.buyWithQuote（非原子）`, expected: +ethers.formatEther(q.shares), quoteSpent: +ethers.formatUnits(got, dec), txHash: hashes.at(-1), hashes };
   }
 
   // 真实卖出曲线份额，得到报价币；非 BNB 底池再用 baw 把报价币换回 BNB
@@ -165,23 +183,50 @@ export class Portal {
     const qc = bnbQuote ? null : new ethers.Contract(quoteAddress, ERC20_ABI, this.provider);
     const dec = bnbQuote ? 18 : Number(await qc.decimals().catch(() => 18));
     const before = bnbQuote ? 0n : await qc.balanceOf(wallet);
-    const hashes = [await this.send({ wallet, to: PORTAL, inputData, label: p >= 100 ? 'Portal.sellAll' : `Portal.sell ${p}%`, step })];
+    let hashes;
+    try { hashes = [await this.send({ wallet, to: PORTAL, inputData, label: p >= 100 ? 'Portal.sellAll' : `Portal.sell ${p}%`, step })]; }
+    catch (e) {
+      // 卖出那笔要在币安 App 里确认（或结果未知）：报价币确认后才到账，交给上层 followUp 确认后接着换回 BNB（以前这一步被跳过，报价币留在钱包）
+      const fromBlock = !bnbQuote && toBnb ? await this.provider.getBlockNumber().then((b) => b - 2).catch(() => undefined) : null;
+      if (!bnbQuote && toBnb && ['APP_CONFIRM', 'UNCONFIRMED', 'UNKNOWN_SUBMIT'].includes(e.code)) e.afterConfirm = async (log) => {
+        const got = await waitReceived({ provider: this.provider, token: quoteAddress, wallet, senders: [PORTAL, market], fromBlock });
+        if (got <= 0n) return { note: `5 分钟内没收到 ${quoteSym}（可能在 App 里拒绝了），没有换回 BNB` };
+        log(`收到 ${ethers.formatUnits(got, dec)} ${quoteSym}，接着换回 BNB`, 0);
+        return this.swapBack({ wallet, quoteAddress, quoteSym, dec, got, slippage, step: log, hashes: [] });
+      };
+      throw e;
+    }
     if (bnbQuote) return { venue: 'Portal.sell（BNB）', expected: +ethers.formatEther(expected), txHash: hashes[0], hashes };
     const got = await this.received(qc, wallet, before);
     if (got <= 0n) return { venue: `Portal.sell → ${quoteSym}`, expected: null, txHash: hashes[0], hashes, note: `已卖出，但没读到 ${quoteSym} 到账，没有换回 BNB` };
     if (!toBnb) return { venue: `Portal.sell → ${quoteSym}`, expected: null, txHash: hashes[0], hashes, note: `已卖出得到 ${ethers.formatUnits(got, dec)} ${quoteSym}（「卖出后自动换回 BNB」已关闭，留在钱包）` };
+    return this.swapBack({ wallet, quoteAddress, quoteSym, dec, got, slippage, step, hashes });
+  }
+
+  // 卖出到账的报价币换回 BNB（只换这次到账的数量）
+  async swapBack({ wallet, quoteAddress, quoteSym, dec, got, slippage, step, hashes }) {
     const t = Date.now();
-    // 兑换只提交一次；超时或返回不完整不代表失败，必须先查原订单。
-    let o = null, sw = {}, conversionError = '';
+    // 兑换只提交一次；超时或返回不完整不代表失败，必须先查原订单（不自动重试，避免重复卖出）。只换这次卖出实际到账的那部分（链上余额差，整数）
+    let o = null, sw = {}, conversionError = '', usdtGot = null;
     try {
-      sw = await baw.marketSwap({ fromTokenQty: ethers.formatUnits(got, dec), fromToken: quoteAddress, toToken: BNB_NATIVE, slippage });
+      if (viaUsdt(quoteAddress)) {   // Ondo 类报价币（NVDAB / FXIon …）只能和稳定币直接换：报价币→USDT→BNB
+        const a = await baw.marketSwap({ fromTokenQty: ethers.formatUnits(got, dec), fromToken: quoteAddress, toToken: USDT, slippage });
+        const oa = a.orderId ? await baw.pollOrder(a.orderId) : null;
+        if (oa?.status !== 'FINISHED') { o = oa; sw = a; throw new Error(`${quoteSym}→USDT ${oa?.status === 'FAILED' ? '失败' : '未完成'}（订单 ${a.orderId || '无'}）`); }
+        if (oa.txHash) hashes.push(oa.txHash);
+        usdtGot = String(oa.toTokenActualQty); step(`${quoteSym}→USDT 完成 ${usdtGot}`, Date.now() - t);
+        sw = await baw.marketSwap({ fromTokenQty: usdtGot, fromToken: USDT, toToken: BNB_NATIVE, slippage });
+      } else sw = await baw.marketSwap({ fromTokenQty: ethers.formatUnits(got, dec), fromToken: quoteAddress, toToken: BNB_NATIVE, slippage });
       if (sw.orderId) o = await baw.pollOrder(sw.orderId);
-    } catch (e) { conversionError = e.message; }
+    } catch (e) {
+      conversionError = e.message;
+      if (ONDO_RE.test(e.message) && !viaUsdt(quoteAddress)) { markViaUsdt(quoteAddress); conversionError += `（已记住 ${quoteSym} 只能经 USDT 兑换，请再卖一次）`; }
+    }
     if (o?.txHash) hashes.push(o.txHash);
     if (o?.status !== 'FINISHED') return {
       venue: `Portal.sell → ${quoteSym}`, expected: null, txHash: hashes[0], hashes,
       conversion: { status: o?.status || 'UNKNOWN', orderId: sw.orderId || null, error: conversionError || null },
-      note: `内盘卖出已完成；换回 BNB ${o?.status === 'FAILED' ? '失败' : '结果尚未确认'}（订单 ${sw.orderId || '未返回'}）。已停止自动兑换，请先查订单和余额，勿重复提交。${conversionError ? ' ' + conversionError : ''}`,
+      note: `内盘卖出已完成；换回 BNB ${o?.status === 'FAILED' ? '失败' : '结果尚未确认'}（订单 ${sw.orderId || '未返回'}）。已停止自动兑换，请先查订单和余额，勿重复提交。${usdtGot != null ? ` 已换出 ${usdtGot} USDT 留在钱包。` : ''}${conversionError ? ' ' + conversionError : ''}`,
     };
     step(`${quoteSym}→BNB 完成`, Date.now() - t);
     return { venue: `Portal.sell → ${quoteSym} → BNB`, expected: Number(o.toTokenActualQty || 0), txHash: hashes.at(-1), hashes };

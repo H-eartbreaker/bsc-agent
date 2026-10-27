@@ -3,6 +3,7 @@
 import { execFile } from 'node:child_process';
 import { ethers } from 'ethers';
 import { BAW_BIN, BINANCE_CHAIN_ID, BAW_SLIPPAGE_UNIT, MODE, DRY_RUN } from './config.js';
+import { assertLiquid, isQuoteToken } from './quoteRoutes.js';
 
 const READ_ONLY_COMMANDS = new Set([
   'wallet status', 'wallet address', 'wallet balance', 'wallet agent-id',
@@ -30,13 +31,36 @@ function formatErr(parsed, fallback) {
   return e ? `${e.name || e.code || 'baw_error'}: ${e.message || ''}`.trim() : fallback;
 }
 
-export function runBaw(args, { timeoutMs = 90_000 } = {}) {
+// 不同版本的 baw 支持的参数不一样（比如 1.11.0 的 wallet balance 没有 --hideLowValue，1.12.0 才有）。
+// baw 报「unknown option '--X'」时去掉这个参数（连同它的值）重试一次，并记住，之后不再传。参数解析失败时 baw 什么都没做，重试是安全的。
+const unsupportedFlags = new Set();
+const stripFlags = (args) => {
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    if (unsupportedFlags.has(args[i])) { if (i + 1 < args.length && !String(args[i + 1]).startsWith('--')) i++; continue; }
+    out.push(args[i]);
+  }
+  return out;
+};
+
+export async function runBaw(args, opts = {}) {
+  try { return await runBawOnce(stripFlags(args), opts); }
+  catch (e) {
+    const flag = /unknown option '(--[A-Za-z][\w-]*)'/.exec(e.message)?.[1];
+    if (!flag || unsupportedFlags.has(flag) || !args.includes(flag)) throw e;
+    unsupportedFlags.add(flag);
+    console.warn(`[baw] 当前 baw 不支持 ${flag}，已去掉这个参数重试`);
+    return runBawOnce(stripFlags(args), opts);
+  }
+}
+
+function runBawOnce(args, { timeoutMs = 90_000, signal, onChild } = {}) {
   // Fail closed at the only CLI invocation point, including claims, rules and approvals.
   if ((DRY_RUN || MODE !== 'live') && !READ_ONLY_COMMANDS.has(args.slice(0, 2).join(' '))) {
     return Promise.reject(Object.assign(new Error('只读模式禁止发送交易、转账或修改授权'), { code: 'READ_ONLY' }));
   }
   return new Promise((resolve, reject) => {
-    const child = execFile(BAW_BIN, ['--json', ...args], { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: process.env }, (err, stdout, stderr) => {
+    const child = execFile(BAW_BIN, ['--json', ...args], { signal, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: process.env }, (err, stdout, stderr) => {
       const text = String(stdout || '').trim();
       let parsed = null;
       if (text) { try { parsed = JSON.parse(text); } catch { /* 非 JSON */ } }
@@ -49,15 +73,20 @@ export function runBaw(args, { timeoutMs = 90_000 } = {}) {
       resolve(parsed);
     });
     child.on('error', reject);
+    onChild?.(child);   // 调用方可以拿到子进程（比如取消登录时结束 auth verify）
   });
 }
 
+// 域名 → 地址（.ai Agent ID、.bnb SPACE ID 等，由币安后端解析；只读）
+export async function resolveDomain(name) { return (await runBaw(['wallet', 'resolve-domain', '--name', String(name), '--binanceChainId', '56'], { timeoutMs: 20_000 })).data || {}; }
 export async function walletStatus() { return (await runBaw(['wallet', 'status'], { timeoutMs: 20_000 })).data?.status || 'UNKNOWN'; }
 export async function agentId() { return (await runBaw(['wallet', 'agent-id'], { timeoutMs: 20_000 })).data || {}; }
 
 // 登录：signin 返回 urlForWeb + pairingCode（已登录时 status=ALREADY_CONNECTED）；verify 会阻塞到 App 里确认或 5 分钟超时
 export async function authSignin() { return (await runBaw(['auth', 'signin'], { timeoutMs: 30_000 })).data || {}; }
-export async function authVerify(qrCodeId) { return (await runBaw(['auth', 'verify', '--qrCodeId', String(qrCodeId)], { timeoutMs: 330_000 })).data || {}; }
+export async function authVerify(qrCodeId, opts = {}) { const { signal, onChild } = typeof opts === 'function' ? { onChild: opts } : opts; return (await runBaw(['auth', 'verify', '--qrCodeId', String(qrCodeId)], { timeoutMs: 330_000, signal, onChild })).data || {}; }
+// 登出当前登录目录的会话（只在登录了错误账号时用，清掉这个错的会话）
+export async function authSignout() { return (await runBaw(['auth', 'signout'], { timeoutMs: 20_000 })).data || {}; }
 
 // 钱包是否被锁：有一笔交易在等币安 App 确认时是 LOCKED，这时任何新交易都会被拒
 export async function walletLock() { return (await runBaw(['wallet', 'tx-lock', '--binanceChainId', String(BINANCE_CHAIN_ID)], { timeoutMs: 20_000 })).data?.status || 'UNKNOWN'; }
@@ -72,6 +101,8 @@ export async function walletBalance({ tokenAddress } = {}) {
 }
 
 export async function marketQuote({ fromTokenQty, fromToken, toToken, slippage }) {
+  // 报价时就把「池子太小」的原因告诉页面，不等到下单。只检查计价币：普通代币（比如发射后在外盘卖出的持仓）不检查，池子再小也要能卖
+  for (const tk of [fromToken, toToken]) if (!DEEP.has(String(tk).toLowerCase()) && isQuoteToken(tk)) await assertLiquid(tk);
   const args = ['market-order', 'quote', '--fromTokenQty', String(fromTokenQty), '--fromToken', assertAddress(fromToken, 'fromToken'),
     '--toToken', assertAddress(toToken, 'toToken'), '--binanceChainId', String(BINANCE_CHAIN_ID)];
   if (slippage != null) args.push('--slippage', slip(slippage));
@@ -100,7 +131,11 @@ export async function contractCall({ from, to, valueWei = '0', inputData }) {
   return { ...pre, dryRun: false, orderId: ex.orderId, status: ex.status, txHash: ex.txHash || null, message: ex.message || null };
 }
 
+const DEEP = new Set(['0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', '0x55d398326f99059ff775485246999027b3197955', '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', '0x8d0d000ee44948fc98c9b98a4fa4921476f08b0d']);   // BNB、WBNB、USDT、USDC、USD1
 export async function marketSwap({ fromTokenQty, fromToken, toToken, slippage, mev = false, gasLevel = 'HIGH' }) {
+  // 计价币兑换前检查流动性：最深的池子太小（低于 QUOTE_MIN_LIQ_USD，默认 $20,000）就拒绝，避免在小池子里吃大滑点。BNB / WBNB / 主流稳定币不查；
+  // 普通代币（发射后在外盘买卖的持仓）也不查——以前对所有代币都查，外盘池子小于 2 万美元、或 DexScreener 还没收录的币会被拒绝卖出
+  for (const tk of [fromToken, toToken]) if (!DEEP.has(String(tk).toLowerCase()) && isQuoteToken(tk)) await assertLiquid(tk);
   const args = ['market-order', 'swap', '--fromTokenQty', String(fromTokenQty), '--fromToken', assertAddress(fromToken, 'fromToken'),
     '--toToken', assertAddress(toToken, 'toToken'), '--binanceChainId', String(BINANCE_CHAIN_ID), '--mev', mev ? 'true' : 'false', '--gasLevel', gasLevel];
   if (slippage != null) args.push('--slippage', slip(slippage));

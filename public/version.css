@@ -1,0 +1,38 @@
+/* 版本管理面板（底栏右下角的版本号） */
+.vm-btn { position: relative; font-size: 11px; }
+.vm-new { font-style: normal; font-size: 9px; font-weight: var(--fw-strong); line-height: 14px; padding: 0 5px; border-radius: 4px; background: var(--g-bg); color: var(--g); border: 1px solid rgba(30, 203, 129, .35); margin-left: 2px; }
+.vm-pop { position: fixed; right: 8px; bottom: 32px; z-index: 60; width: 360px; max-width: calc(100vw - 16px); max-height: calc(100vh - 90px); overflow-y: auto; background: #0d1116; border: 1px solid var(--line2); border-radius: 12px; padding: 12px 14px; box-shadow: 0 12px 40px rgba(0, 0, 0, .55); display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.vm-h { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.vm-x { font-size: 18px; line-height: 1; color: var(--muted); padding: 0 4px; } .vm-x:hover { color: var(--text); }
+.vm-line b { color: var(--text); }
+.vm-sub { font-size: 11px; } .vm-sub a, .vm-pop a { color: var(--b); text-decoration: none; }
+.vm-warn { font-size: 11.5px; color: var(--y); background: var(--y-bg); border-radius: 6px; padding: 6px 8px; }
+.vm-notes { display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.vm-rel + .vm-rel { border-top: 1px solid var(--line); padding-top: 8px; }
+.vm-rt { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+.vm-nh { color: var(--y); font-weight: var(--fw-strong); margin-top: 4px; }
+.vm-nl { color: #c3cad3; line-height: 1.5; } .vm-nl code { font-family: var(--mono); font-size: 11px; background: #1b222c; padding: 0 3px; border-radius: 3px; }
+.vm-cur summary { cursor: pointer; color: var(--muted); } .vm-cur .vm-notes { margin-top: 6px; }
+.vm-btns { display: flex; gap: 8px; }
+.vm-b { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 12px; border: 1px solid var(--line2); border-radius: 7px; color: var(--text); background: var(--panel); font-size: 12px; }
+.vm-btns { align-items: center; gap: 12px; }
+.vm-link { color: var(--g) !important; } .vm-link:hover { text-decoration: underline; }
+.vm-b:hover:not(:disabled) { border-color: var(--muted); }
+.vm-b:disabled { opacity: .45; cursor: not-allowed; }
+.vm-b.primary { height: 32px; background: var(--g); border-color: var(--g); color: #04140c; font-weight: var(--fw-strong); }
+.vm-b.warn { border-color: rgba(246, 70, 93, .5); color: var(--r); margin-top: 6px; width: 100%; }
+.vm-b.sm { height: 22px; padding: 0 10px; font-size: 11px; }
+.vm-job { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.vm-log { font-size: 10.5px; color: var(--muted); max-height: 120px; overflow-y: auto; }
+.vm-dirty { font-size: 11.5px; color: #c3cad3; }
+.vm-files { font-size: 10.5px; color: var(--muted); max-height: 100px; overflow-y: auto; margin: 4px 0; }
+.vm-hist { border-top: 1px solid var(--line); padding-top: 6px; }
+.vm-ht { width: 100%; display: flex; gap: 6px; font-weight: var(--fw-strong); color: var(--muted); padding: 2px 0; } .vm-ht:hover { color: var(--text); }
+.vm-hb { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.vm-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 4px; border-radius: 6px; } .vm-row:hover { background: var(--panel2); }
+.vm-bt { font-size: 11px; margin-top: 8px; }
+.vm-row2 { display: flex; align-items: center; gap: 8px; } .vm-row2 span { flex: 1; } .vm-row2 .vm-b { flex: none; }
+.vm-ask { border: 1px solid var(--y); background: var(--y-bg); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.vm-ask b { font-size: 13px; } .vm-ask ul { margin: 0; padding-left: 16px; color: #c3cad3; line-height: 1.6; }
+.vm-ask-b { display: flex; justify-content: flex-end; gap: 8px; } .vm-ask-b .vm-b { height: 28px; width: auto; margin: 0; }
+.vm-err { display: flex; gap: 6px; align-items: flex-start; color: var(--r); background: var(--r-bg); border-radius: 6px; padding: 6px 8px; font-size: 11.5px; } .vm-err span { flex: 1; } .vm-err .vm-x { font-size: 14px; }

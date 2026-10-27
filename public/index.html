@@ -7,8 +7,10 @@
 <link rel="icon" type="image/png" sizes="32x32" href="logo-32.png?v=gold-b-1" />
 <link rel="icon" type="image/png" sizes="96x96" href="logo-96.png?v=gold-b-1" />
 <link rel="apple-touch-icon" href="logo.png?v=gold-b-1" />
-<link rel="stylesheet" href="style.css?v=1792949157" />
-<link rel="stylesheet" href="agent.css?v=14" />
+<link rel="stylesheet" href="style.css?v=bsc-agent-copy-33" />
+<link rel="stylesheet" href="agent.css?v=19" />
+<link rel="stylesheet" href="tracking-panel.css?v=4" />
+<link rel="stylesheet" href="version.css?v=1" />
 </head>
 <body class="fav-on">
 <header class="topbar">
@@ -16,7 +18,7 @@
     <img class="brand-logo" src="logo.png?v=gold-b-1" width="30" height="30" alt="BSC Agent" />
     <div><div class="brand-t">BSC Agent</div><div class="brand-sub">行情终端</div></div>
   </div>
-  <div class="viewsw" id="viewSw"><button data-view="trade" class="active">行情</button><button data-view="pulse">战壕</button><button data-view="hold">持仓</button></div>
+  <div class="viewsw" id="viewSw"><button data-view="trade" class="active">行情</button><button data-view="pulse">战壕</button><button data-view="track" data-also="snipe">追踪/狙击</button></div>
   <label class="search">
     <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2"/></svg>
     <input id="search" placeholder="搜索代币或粘贴合约地址" aria-label="搜索代币或合约地址" autocomplete="off" />
@@ -24,10 +26,11 @@
     <div id="searchResults" class="search-results hidden"></div>
   </label>
   <div class="header-wallet">
-  <button class="pill as-pill hidden" id="autoSendPill" data-autosend title="自动转出设置"></button>
   <div class="authpill hidden" id="authPill"><i></i><span></span></div>
   <button class="pill fav-tg" id="favToggle" title="收藏栏（显示 / 隐藏）" aria-label="显示或隐藏收藏栏"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z"/></svg></button>
 
+  <button class="pill pause-all hidden" id="pauseAll" type="button"></button>
+  <a class="pill gh-btn" id="ghBtn" href="https://github.com/H-eartbreaker/bsc-agent" target="_blank" rel="noopener" title="GitHub：有新版本会提醒"><svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><i class="gh-dot hidden"></i></a>
   <div class="wallet-sel" id="walletSel">
     <i class="wav" id="wsAvatar"></i><div class="wallet-identity"><span class="wtag" id="wsLabel">钱包</span><span class="handle" id="wsHandle"></span></div>
     <div class="wallet-balance"><span class="mono" id="wsAddr">连接中</span><span class="mono muted" id="wsBal"></span></div><span class="caret">▾</span>
@@ -55,7 +58,7 @@
         <button class="ibtn" id="btnSound" title="声音：出新币「叮咚」、成交提示音（战壕各列的小喇叭单独控制）"><svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path class="w" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/><path class="x" d="M16 9.5l5 5m0-5l-5 5"/></svg></button>
       </div>
       </div>
-      <div class="market-tools-summary"><span id="marketQuickSummary"></span><button id="marketSettingsToggle" type="button" aria-expanded="false" aria-controls="marketSettings">展开设置</button></div>
+      <div class="market-tools-summary"><span id="marketQuickSummary"></span><button id="marketTrenchFilter" class="market-trench-filter" type="button" data-market-tf title="使用战壕的完整筛选">战壕筛选</button><button id="marketSettingsToggle" type="button" aria-expanded="false" aria-controls="marketSettings">展开设置</button></div>
       <div id="marketSettings" class="hidden">
     <div class="market-buybar" id="marketBuybar">
       <b class="market-buy-title">快捷买入</b><div class="seg xs" id="marketBuyMode"><button data-mbmode="pct" class="active">按总量 %</button><button data-mbmode="bnb">按 BNB</button></div>
@@ -99,9 +102,9 @@
     <div class="vsplit" id="vsplit" title="上下拖动调整 K 线高度"></div>
     <div class="panel bottom">
       <div class="tabs btabs" id="bottomTabs">
-        <button data-b="trades" class="active">实时成交</button><button data-b="flow">全市场成交流</button><button data-b="pos">我的持仓</button>
+        <button data-b="myhold">我的持仓</button><button data-b="trades" class="active">实时成交</button><button data-b="flow">全市场成交流</button><button data-b="holders" title="按持仓排名的持有人：总买入、总卖出、利润、买入市值；点一行看这个地址的每一笔买卖">持有人</button>
         <button data-b="orders">终端订单</button><button data-b="fills">成交记录</button><button data-b="assets">钱包资产</button><button data-b="logs">事件日志</button>
-        <span class="spacer"></span><span class="muted" id="bottomCnt"></span>
+        <span class="spacer"></span><button class="pill as-pill hidden" id="autoSendPill" data-autosend title="自动转出设置"></button><a href="#" id="trkToggleBtm" class="bt-qb" aria-expanded="false" aria-controls="walletTrackingPanel" title="显示 / 隐藏钱包追踪面板">◎ 钱包追踪 <span id="walletTrackingCount">0</span></a><a href="#" data-qbtoggle id="qbToggleBtm" class="bt-qb" title="显示 / 隐藏一键买卖面板">⚡ 一键买卖</a><span class="muted" id="bottomCnt"></span>
       </div>
       <div class="btable" id="bottomBody"></div>
     </div>
@@ -138,15 +141,22 @@
     <section class="approval-panel"><h3>授权管理</h3><p class="control-help">授权允许指定合约使用你的代币。这里只查询本程序记录过的授权，不代表钱包的全部授权。</p><button class="settings-row" id="openApprovals"><span>读取 / 刷新授权</span><span class="muted">查看额度</span></button><div id="approvalBody" role="status">尚未读取授权记录。</div></section>
     <button class="settings-row" id="autoSendLink" data-autosend><span>自动转出设置</span><span class="muted" id="autoSendSum">—</span></button>
     <button class="settings-row" data-bmgr><span>已屏蔽的代币 / 开发者</span><span class="muted">查看 · 取消屏蔽</span></button>
+    <button class="big-btn" id="submit">买入</button>
 
     </div></section>
-    <section class="strategy-inline" id="strategyInline"><h3>完整策略与风控</h3><div id="settingsBody"></div></section>
     <div class="card" id="myPos"></div>
     <details class="token-details"><summary>代币与合约信息</summary>
     <div class="card" id="tokenInfo"></div></details>
   </aside>
 </main>
-<section class="hold hidden" id="hold"><div class="hold-in">
+<!-- 左侧「钱包追踪」面板（覆盖在页面左边，可拖宽度、可关闭）+ 底部工具栏 -->
+<aside class="panel trk-panel hidden" id="trkPanel"><div class="lh trkp-h"><i class="dot y"></i><b class="lh-t">钱包追踪</b><span class="cnt" id="trkpCount">0</span><div class="lctrl"><input id="trkpMin" class="trkp-min" type="number" step="1" min="0" placeholder="≥ $" title="最小金额（美元）：小于这个金额的成交不显示，和追踪页的「最小金额」是同一个设置"/><button class="apill" id="trkpGo" title="打开追踪页（管理地址、跟单）">管理</button><button class="ibtn" id="trkpClose" title="收起这一栏"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div></div><div class="trkp-list" id="trkpList"></div><i class="trkp-drag" id="trkpDrag" title="拖动调整宽度"></i></aside>
+
+<section class="track snipe hidden" id="snipe"><div class="ts-sw" role="tablist"><button data-tsview="track">追踪</button><button data-tsview="snipe">gang.fun 狙击</button></div><div class="snp"><div id="snpHead"></div><h4 class="trk-h">狙到的币（自动卖出盯着的）</h4><div id="snpPos"></div><div id="snpForm"></div><h4 class="trk-h">狙击记录（每一个新盘的决定、每一次自动卖出：下单 / 跳过及原因）</h4><div class="trk-log" id="snpLog"></div></div></section>
+<section class="hold hidden" id="hold">
+  <!-- 持仓页左侧：Gang 新币战壕（和交易页左栏 Gang 页签同一套卡片和状态框） -->
+  <aside class="panel hold-gang" id="holdGang"><div class="lh"><i class="dot g"></i><b class="lh-t">Gang 新币</b><span class="cnt" id="hgCnt">0</span><div class="lctrl"><button class="ibtn" id="hgClose" title="收起（左下角「Gang 新币」再打开）">×</button></div></div><div class="agent-status" id="hgSt"></div><div class="tlist tl-trench" id="hgBody"></div></aside>
+  <div class="hold-in">
   <div class="hold-h">
     <div class="hold-tot" id="holdTot"></div>
     <div class="hold-f"><span class="plg" id="holdPlats"><i class="pf" data-hp="flap">Flap</i><i class="p4" data-hp="four">Four</i><i class="pg" data-hp="gang">Gang</i></span>
@@ -155,25 +165,57 @@
   <div class="hold-sw" id="holdSwap"></div>
   <div class="hold-q" id="holdQuote"></div>
   <div class="hold-b" id="holdBody"></div>
-</div></section>
+</div>
+  <button class="hg-open hidden" id="hgOpen" title="显示 Gang 新币战壕">Gang 新币 ›</button>
+</section>
 <section class="pulse trench hidden" id="pulse">
+  <div class="pulse-tools"><b>战壕</b><span class="muted">实时新币 / 打满 / 已开盘</span><button type="button" data-pulse-compact class="pulse-compact-toggle">小窗模式</button><span class="pulse-cols"><button data-pulse-col="new" class="on">新创建</button><button data-pulse-col="soon">即将打满</button><button data-pulse-col="dex">已开盘</button></span></div>
   <div class="tcol" id="tc-new"><div class="tchw" id="tch-new"></div><div class="tc-pop-w hidden" id="tcf-new"></div><div class="tcb" id="tcb-new"></div></div>
   <div class="tcol" id="tc-soon"><div class="tchw" id="tch-soon"></div><div class="tc-pop-w hidden" id="tcf-soon"></div><div class="tcb" id="tcb-soon"></div></div>
   <div class="tcol" id="tc-dex"><div class="tchw" id="tch-dex"></div><div class="tc-pop-w hidden" id="tcf-dex"></div><div class="tcb" id="tcb-dex"></div></div>
 </section>
+<section class="track hidden" id="track">
+  <div class="ts-sw" role="tablist"><button data-tsview="track">追踪</button><button data-tsview="snipe">gang.fun 狙击</button></div>
+  <div class="track-head"><b>追踪管理</b><button data-open-tracking>打开看盘面板</button><span class="spacer"></span><button class="track-kill" id="trackKill">全部暂停</button></div>
+  <div id="trackSummary" role="status"></div>
+  <nav class="track-section-tabs" aria-label="追踪管理内容"><button data-track-tab="feed" class="active">追踪动态</button><button data-track-tab="copy">跟单策略</button></nav>
+  <div class="track-grid" id="trackFeedSection">
+    <aside class="track-side"><div class="track-add"><input id="trackAddress" aria-label="追踪钱包地址" placeholder="域名（xxx.ai / xxx.bnb）或 0x 地址" autocomplete="off"/><div class="track-addrow"><button id="trackLookBtn" title="按地址查 .ai / .bnb 域名并写备注（不追踪也能备注）">查域名</button><button id="trackAddBtn" class="primary">添加追踪</button></div><details class="track-more"><summary>备注、分组（可选）</summary><input id="trackName" aria-label="追踪钱包备注名" placeholder="备注名"/><input id="trackGroup" aria-label="分组" placeholder="分组（默认）" list="trackGroups"/><datalist id="trackGroups"></datalist></details><small id="trackMsg"></small></div><h3>已追踪的钱包</h3><div id="trackTargets"></div></aside>
+    <div class="track-main"><div class="track-toolbar"><select id="trackFGroup" aria-label="按分组筛选"><option value="">全部分组</option></select><label class="muted">最小 <input id="trackFMin" type="number" step="0.01" min="0" placeholder="0" style="width:64px"/> BNB</label><span id="trackCount" class="muted"></span><button id="trackRefresh">刷新</button><span class="muted">从添加后开始实时追踪</span></div><div id="trackFeed"></div><button id="trackMore" class="hidden">加载更早记录</button></div>
+  </div>
+  <section class="copy-panel hidden" id="trackCopySection" aria-label="自动跟单">
+    
+    <div id="copyTasks" class="copy-tasks"></div>
+    <details class="copy-new" id="copyNew"><summary>＋ 新建跟单策略</summary><form id="copyStrategyForm" class="copy-strategy-form">
+      <div class="copy-editor-head"><b id="copyEditorTitle">新建跟单策略</b><button type="button" id="copyEditCancel" class="hidden">取消编辑</button></div>
+      <fieldset><legend>跟谁 · 如何买入</legend><div class="copy-form-grid">
+        <label>目标钱包<select id="copyTarget" required><option value="">先添加追踪地址</option></select></label>
+        <label>任务名称<input id="copyName" placeholder="可选" maxlength="40"/></label>
+        <label>跟买方式<select id="copyEntryMode"><option value="fixed">固定 BNB</option><option value="ratio">按对方买入金额比例</option></select></label>
+        <label>每钱包买入 BNB<input id="copyAmount" type="number" min="0.001" max="0.5" step="0.001" value="0.01" required/></label>
+        <label>跟随比例 %<input id="copyRatio" type="number" min="0.01" max="1000" step="0.01" value="10" disabled/></label>
+        <label>最多跟买次数（0=不限）<input id="copyMaxCopies" type="number" min="0" max="1000" step="1" value="1"/></label>
+      </div><div class="copy-form-checks"><label><input id="copyOnlyFirst" type="checkbox" checked/> 只跟首次建仓</label><span class="copy-plats">平台 <label><input data-copy-plat="flap" type="checkbox" checked/> Flap</label><label><input data-copy-plat="four" type="checkbox" checked/> Four</label><label><input data-copy-plat="gang" type="checkbox" checked/> Gang</label></span></div></fieldset>
+      <details class="copy-adv"><summary>高级设置：预算、止盈止损、跟卖</summary><div class="copy-form-grid" id="copyAdvancedFields"></div><div class="copy-form-checks"><label><input id="copyFollowSell" type="checkbox"/> 跟目标减仓／清仓（只卖本任务跟买的仓位）</label></div><p class="muted">预算中“合计”按所有执行钱包累计；止盈／止损填 0 为关闭。出场规则独立于跟买次数上限。</p></details>
+      <fieldset><legend>执行方式</legend><div class="copy-form-checks" id="copyWallets"></div><input id="copyDryRun" type="checkbox" hidden/><p id="copyExecutionStatus" class="muted"></p></fieldset>
+      <div class="copy-editor-foot"><button type="submit" id="copyCreateBtn" class="copy-create-btn">创建策略（暂停）</button><span id="copyMsg" role="status"></span></div>
+    </form></details>
+    <div id="copyLog" class="copy-log"></div>
+  </section>
+</section>
 
-<footer class="statusbar"><span class="chain-status"><i class="dot g"></i>BSC 主网</span>  <div class="pill"><i class="dot y"></i><span class="muted">WSS</span><b id="wssName">…</b><span class="g mono" id="wssMs"></span></div>  <div class="pill"><i class="dot g"></i><span class="muted">RPC</span><b id="rpcName">…</b><span class="g mono" id="rpcMs"></span></div>  <div class="pill mono muted" id="blockNo">#—</div>  <div class="pill mono muted" id="bnbPx">BNB —</div>  <div class="pill" id="modeBadge">连接中…</div><span class="spacer"></span><span class="status-version">BSC Agent 行情终端</span></footer>
+<footer class="statusbar"><a href="#" class="pill" id="selfCheckBtn" title="检查哪里没配好">🩺 自检</a><span class="chain-status"><i class="dot g"></i>BSC 主网</span>  <div class="pill"><i class="dot y"></i><span class="muted">WSS</span><b id="wssName">…</b><span class="g mono" id="wssMs"></span></div>  <div class="pill"><i class="dot g"></i><span class="muted">RPC</span><b id="rpcName">…</b><span class="g mono" id="rpcMs"></span></div>  <div class="pill mono muted" id="blockNo">#—</div>  <div class="pill mono muted" id="bnbPx">BNB —</div>  <div class="pill" id="modeBadge">连接中…</div><span class="spacer"></span><div class="pill mono muted" id="gangMc" title="GANG 市值（DexScreener，约每分钟更新）">GANG 市值 —</div><a class="bb-btn" id="latencyLink" href="latency.html" target="_blank" rel="noopener" style="text-decoration:none" title="下单耗时：每笔买卖从点击到上链花了多久，卡在哪一步"><span class="bb-ic">⏱</span>下单耗时</a><button class="bb-btn vm-btn" id="vmBtn" title="版本提示（只提示，不自动更新）">BSC Agent</button><div class="vm-pop hidden" id="vmPop"></div></footer>
 
 <!-- 下单确认 -->
 <!-- 币安钱包未登录时的锁定弹窗：不能用 Esc 或点背景关闭，登录成功后自动消失 -->
-<div class="lockmodal authgate hidden" id="loginModal" role="dialog" aria-modal="true">
+<div class="lockmodal authgate hidden" id="loginModal" role="dialog" aria-modal="true" aria-labelledby="loginTitle" aria-describedby="loginLead">
   <div class="lockbox">
     <img class="ag-logo" src="logo.png?v=gold-b-1" width="64" height="64" alt="BSC Agent" />
-    <h3>请先登录币安 Agentic Wallet</h3>
+    <h3 id="loginTitle">请先登录币安 Agentic Wallet</h3>
     <p class="muted" id="loginLead">检测到币安钱包<b class="r">未登录</b>。登录前所有功能都不能使用。</p>
     <ol class="ag-steps" id="loginBody"></ol>
-    <div class="lockbtns"><button class="big-btn" id="loginRecheck">我已登录，重新检测</button></div>
-    <p class="muted ag-note" id="loginNote"></p>
+    <div class="lockbtns"><button class="big-btn" id="loginGo">登录币安钱包</button><button class="big-btn secondary" id="loginRecheck">重新检测</button></div>
+    <p class="muted ag-note" id="loginNote" role="status" aria-live="polite"></p>
   </div>
 </div>
 <div class="modal hidden" id="confirmModal">
@@ -192,6 +234,7 @@
 
 <div class="toasts" id="toasts"></div>
 <script src="vendor/lightweight-charts.standalone.production.js?v=1792914154.2.0"></script>
-<script type="module" src="app.js?v=bsc-agent-14"></script>
+<script type="module" src="app.js?v=bsc-agent-49"></script>
+<script type="module" src="version.js?v=4"></script>
 </body>
 </html>

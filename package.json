@@ -1,7 +1,7 @@
 {
   "name": "bsc-agent",
-  "version": "0.1.0",
-  "description": "本地运行的 BSC Agent BSC 内盘行情、报价与交易终端；实盘交易默认关闭自动策略",
+  "version": "0.3.0",
+  "description": "本地运行的 BSC Agent 内盘快速买卖终端（Flap / Four / gang.fun），通过币安 Agentic Wallet（baw）下单；默认模拟盘",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -9,16 +9,20 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "watch:four": "node scripts/watch-four.js",
+    "gang:preflight": "node scripts/gang-preflight.mjs",
     "testnet:info": "node scripts/testnet-info.js",
     "live": "MODE=live node server.js",
     "live:readonly": "MODE=live LIVE_TRADE=0 NODE_USE_ENV_PROXY=1 node server.js",
-    "live:8788": "MODE=live LIVE_TRADE=1 AUTO_TRANSFER_FOUR=0 PORT=8788 node server.js",
-    "sim:8787": "MODE=sim PORT=8787 node server.js"
+    "setup": "bash install.sh"
   },
   "dependencies": {
     "ethers": "6.17.0",
     "express": "5.1.0",
     "ws": "8.22.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "optionalDependencies": {
+    "ioredis": "5.11.1",
+    "mysql2": "3.24.6"
+  }
 }

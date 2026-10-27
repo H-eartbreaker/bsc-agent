@@ -1,121 +1,127 @@
 <p align="center">
-  <img src="public/logo.png" width="120" alt="BSC Agent logo" />
+  <img src="public/logo.png" width="110" alt="BSC Agent logo" />
 </p>
 
 <h1 align="center">BSC Agent</h1>
 
-<p align="center">A local BSC market, quoting, and trading terminal with a GMGN-style trenches view.</p>
+<p align="center"><b>简体中文</b> · <a href="README.en.md">English</a></p>
+
+<p align="center">跑在你自己电脑上的 BSC 行情 + 交易终端：战壕、K 线、一键买卖、追踪跟单、gang.fun 狙击。<br/>
+<sub>A local BSC market and trading terminal — trenches, charts, quick trade, wallet tracking, gang.fun sniping.</sub></p>
 
 <p align="center">
-  <img src="docs/screenshots/trenches-demo.png" alt="BSC Agent trenches view using simulated data" />
+  <img src="docs/screenshots/trenches-demo.png" alt="战壕界面（演示数据，不含任何钱包信息）" />
 </p>
 
-BSC Agent starts a Node.js service on your computer, listens only on `127.0.0.1`, and provides a browser interface. It supports BSC launchpad markets from Flap, Four, and gang.fun. Live transaction signing is handled by the Binance Agentic Wallet CLI (`baw`); private keys are not stored locally.
+> **一句话**：下载 → `./install.sh` → `./start.sh` → 浏览器里登录币安钱包，就能用。私钥不在本机，服务只听 `127.0.0.1`。
 
-## Features
+---
 
-- GMGN-style trenches with New, Near Graduation, and Launched columns
-- Filters for market cap, holders, progress, tax, quote asset, social links, keywords, and creation time
-- `Min / Max` age filters that hide tokens still not launched after the maximum age
-- K-line charts, live trades, all-market trades, trader P&L, and holdings
-- Quick buy, sell-all, slippage controls, and approval review or revocation
-- Market adapters for Flap, Four, and Gang
-- Automated buy and sell strategies: **included but disabled by default and never enabled automatically after a restart**
-- Auto-claim, auto-transfer, post-sale BNB conversion, and large-allowance approval: disabled by default
-- Simulation mode that does not connect to a wallet or send on-chain transactions
+## 目录
+1. [能做什么](#能做什么)
+2. [3 分钟上手](#3-分钟上手)
+3. [页面怎么用](#页面怎么用)
+4. [安全须知（请先看）](#安全须知请先看)
+5. [更新：GitHub 新版本提醒](#更新github-新版本提醒)
+6. [配置](#配置)
+7. [常见问题](#常见问题)
+8. [开发与测试](#开发与测试)
+9. [许可与免责](#许可与免责)
 
-## Safety boundaries
+## 能做什么
+- **战壕**：新创建 / 即将打满 / 已开盘 三列，覆盖 Flap、Four、gang.fun（Gang V1 / V2 / V3、打新）。每张卡片固定格式：名字 → 底池配对币 · 税率 · 发射模式 → 池子 / 标签 → 时长 · 持有人 · 笔数 → Dev / 首买。
+- **筛选**：每列 P1 / P2 / P3 三套预设，按平台、报价代币、创建时间、市值、持有人、进度、税率、社交链接过滤，自动保存。
+- **K 线与成交**：已开盘代币合并链上成交与外盘历史，市值 / 价格切换，1s 到 1h 多周期，买卖点标注。
+- **一键买卖**：快速买入、清仓、滑点、授权查看与撤销；买卖走币安聚合，聚合没收录的新池子直连 PancakeSwap V2。
+- **追踪 / 跟单**：盯住聪明钱地址，按你设的金额自动跟买、止盈止损。
+- **gang.fun 狙击**：新盘一出就买，每次买多少、每天最多狙几个（默认不限）、自动卖出，都由你定。
+- **全部暂停**：右上角一个按钮，同时停掉追踪和狙击。
+- **自检页**：一眼看到钱包、实盘开关、各模块是否正常，哪里不对会用大白话告诉你。
+- **单钱包**：只用你登录的那一个币安 Agentic Wallet，界面里不会出现多钱包的选项。
 
-This is third-party software that can interact with real funds and has not undergone a formal security audit. Start with simulation mode and verify live behavior with a very small amount.
-
-- Live orders are submitted only when `MODE=live`, `LIVE_TRADE=1`, the wallet is signed in, and the order is confirmed in the interface.
-- Automated buy and sell strategies are disabled by default and run only after you enable their controls in the interface.
-- The server listens only on `127.0.0.1`; do not expose the port publicly or forward it from the internet.
-- Keep RPC keys, transfer addresses, and other private settings in the local `.env` file. Never commit them to Git.
-- The public screenshot uses simulated data and contains no wallet address, AI account name, balance, or transaction history.
-
-## Requirements
-
-- macOS or Linux
-- Node.js 22 or newer
-- npm
-- Binance Agentic Wallet CLI for live mode
+## 3 分钟上手
+**环境**：macOS 或 Linux，Node.js 22 或更新。
 
 ```bash
-npm i -g @binance/agentic-wallet
-baw auth signin
-baw wallet status
-```
-
-Live features require `baw wallet status` to show `CONNECTED`. Sign-in confirmation must be completed by you in the Binance App.
-
-Four agent templates also require the official Binance skill:
-
-```bash
-npx skills add https://github.com/binance/binance-skills-hub --skill binance-agentic-wallet
-```
-
-## Install and run
-
-```bash
-git clone <your-repository-url> bsc-agent
+git clone https://github.com/H-eartbreaker/bsc-agent.git
 cd bsc-agent
-npm install
-cp .env.example .env
+./install.sh      # 检查 Node、装依赖、生成 .env、安装币安钱包命令行 baw
+./start.sh        # 启动并自动打开 http://localhost:8787
 ```
 
-Start with simulation mode:
+首次打开会弹出**新手引导 + 自检**，按顺序做：
+1. **登录币安钱包**：终端里 `baw auth signin`，然后在币安 App 里确认授权；`baw wallet status` 显示 `CONNECTED` 即可。
+2. 打开页面底栏左下角「🩺 自检」，前 4 项都是 ✓ 才算准备好。
+3. 在「追踪 / gang.fun 狙击」里设好**每次买多少**，先用很小的金额试一笔。
+4. 想停：右上角「全部暂停」。
 
-```bash
-npm run sim:8787
-```
+> 国内网络访问行情站不稳时，在 `.env` 里填 `BSC_AGENT_PROXY=http://127.0.0.1:7897`（改成你自己的代理地址）。
 
-Open <http://127.0.0.1:8787>. Simulation mode uses local simulated assets and does not call the real wallet.
+## 页面怎么用
+| 位置 | 作用 |
+|---|---|
+| 顶部 行情 / 战壕 / 追踪·狙击 | 三个主页面，文字导航，当前页高亮 |
+| 右上角 GitHub 图标 | 点开是项目仓库；GitHub 有新版本时亮红点并弹窗提醒 |
+| 右上角 钱包名 + 余额 | 点开可复制钱包地址、查看登录状态 |
+| 战壕列头 | 搜索关键词、每列 ⚡ 买入金额、P1–P3 预设、提示音、已屏蔽数量、筛选漏斗 |
+| 战壕卡片 | 点右侧 MC / 买入区域直接 ⚡ 买入；⊘ 屏蔽；点卡片进入详情 |
+| 追踪 / gang.fun 狙击 | 切换按钮固定在顶部；设好金额、保存、开启（真实买入） |
+| 左侧代币列表 | 宽度可以拖动，双击分隔条恢复默认 |
+| 底栏 自检 / 版本 | 自检页、版本号与更新提示 |
 
-After simulation mode works, start live market data in read-only mode when needed:
+## 安全须知（请先看）
+这是第三方软件，会动真实资金，**没有做过正式安全审计**。请先小额验证。
+- 真实下单需要：`MODE=live`、`LIVE_TRADE=1`、钱包已登录，并在页面里确认。
+- 追踪 / 狙击默认**关闭**，重启后也**不会自动开启**。
+- 服务只监听 `127.0.0.1`，不要把端口映射到公网。
+- RPC key、转出地址等私密设置只放本机 `.env`，不要提交到 Git。`data/` 目录（持仓、记录、令牌）已被 `.gitignore` 忽略。
+- 自动转出、自动领取、大额预授权默认关闭。
 
-```bash
-npm run live:readonly
-```
+## 更新：GitHub 新版本提醒
+- 程序会定时检查本仓库的版本号；有更高版本时，**右上角 GitHub 图标亮红点并弹出提示**（含更新内容）。
+- 弹窗里可以选「稍后提醒」「本版不再提醒」或「去 GitHub 看看」。
+- **只提醒，不会自动更新。** 更新方法：
+  ```bash
+  git pull
+  npm install
+  # 然后重启服务（停掉再 ./start.sh）
+  ```
+  你的钱包、设置、记录（`data/`、`.env`）不会被改动。
+- 想检查别的仓库：`.env` 里设 `BSC_AGENT_UPDATE_REPO=用户名/仓库名`；想关闭：`BSC_AGENT_UPDATE=0`。
+- 每次的更新内容见 [CHANGELOG.md](CHANGELOG.md)（[English](CHANGELOG.en.md)）。
 
-This mode reads live market data and wallet status but only quotes; it does not send real transactions.
+## 配置
+复制 `.env.example` 为 `.env` 后按需修改（`install.sh` 已替你做了）：
 
-If you explicitly need live order execution:
-
-```bash
-MODE=live LIVE_TRADE=1 PORT=8788 node server.js
-```
-
-After live mode starts, automated strategies remain disabled by default. Enable automated buying or selling separately for each platform in the interface.
-
-## Configuration
-
-Copy `.env.example` to `.env` and adjust the settings as needed:
-
-| Variable | Default | Purpose |
+| 变量 | 默认 | 说明 |
 |---|---:|---|
-| `MODE` | `sim` | `sim` for simulation, `live` for live market data |
-| `PORT` | `8787` | Local server port |
-| `LIVE_TRADE` | `0` | Set to `1` to allow live orders; `0` is quote-only |
-| `MAX_TRADE_BNB` | `0.5` | Maximum BNB amount per buy |
-| `NODEREAL_RPC` | empty | Optional private BSC RPC; keep it in `.env` only |
-| `BAW_BIN` | `baw` | Agentic Wallet CLI path |
-| `AUTO_TRANSFER_TO` | empty | Transfer destination; auto-transfer stays unavailable when empty |
-| `PREAPPROVE` | `0` | Large allowance approval; recommended to keep disabled |
+| `MODE` | `live` | 实盘模式（默认） |
+| `PORT` | `8787` | 本地端口 |
+| `LIVE_TRADE` | `1` | `1` 登录后可真实下单；`0` 只看行情、只报价 |
+| `MAX_TRADE_BNB` | `0.5` | 单笔买入上限（BNB），安全阀 |
+| `NODEREAL_RPC` / `NODEREAL_KEYS` | 空 | 私有 BSC 节点，只放 `.env` |
+| `BSC_AGENT_PROXY` | 空 | 访问行情站的代理，例如 `http://127.0.0.1:7897` |
+| `BAW_BIN` | `baw` | 币安钱包命令行路径 |
+| `AUTO_TRANSFER_TO` | 空 | 自动转出地址（也可以在页面「自动转出」里设置，改地址要二次确认） |
+| `BSC_AGENT_UPDATE_REPO` | 官方仓库 | 新版本提醒检查的仓库 |
+| `BSC_AGENT_UPDATE` | 开 | 设 `0` 关闭新版本提醒 |
+| `MYSQL_URL` / `REDIS_URL` | 空 | 可选历史数据缓存，`scripts/enable-cache.sh` 可一键用 Docker 起 |
 
-Project data, logs, caches, and wallet state are written to local `data/`, which is ignored by Git.
+## 常见问题
+- **页面右上角显示"未连接"？** 终端运行 `baw wallet status`，没有 `CONNECTED` 就重新 `baw auth signin`，并在币安 App 里确认。
+- **K 线缺一段 / 和别的软件不一样？** 历史 K 线来自 GeckoTerminal 和 DexScreener，免费接口有频率限制，页面上会出现一行黄色提示说明原因；新打开的币会在后台分页补历史，等几分钟再看。网络不通时请设置 `BSC_AGENT_PROXY`。
+- **点买入提示失败？** 页面会用大白话说明原因（余额不够、滑点太低、钱包未登录等）；也可以先打开「自检」。
+- **改完代码 / 更新后没变化？** 需要重启服务；浏览器按 Cmd/Ctrl+Shift+R 强制刷新。
+- **怎么彻底停掉自动功能？** 右上角「全部暂停」；或直接关闭服务。
 
-## Development and testing
-
+## 开发与测试
 ```bash
-npm test
-node --check public/app.js
+npm test                    # 全部单元测试
+node --check public/app.js  # 前端语法检查
 ```
+`engine/` 是后端（行情、交易、追踪、狙击），`public/` 是静态前端，`server.js` 是入口。提 PR 前请确认测试通过，且没有把 `.env`、`data/` 或任何私人信息带进提交。
 
-## License
+## 许可与免责
+本项目使用 MIT 许可，见 [LICENSE](LICENSE)；`public/vendor/` 里保留了第三方库的许可证文件。
 
-This project is released under the MIT License. You may use, copy, modify, publish, distribute, sublicense, and sell copies of the software, subject to the terms in [LICENSE](LICENSE). `public/vendor/` keeps the license files for its third-party libraries.
-
-## Disclaimer
-
-Token prices, liquidity, taxes, and platform APIs can change quickly. Every trade can lose money or become impossible to sell. The authors do not provide investment advice and are not responsible for financial losses.
+代币价格、流动性、税率和平台接口随时会变；每一笔交易都可能亏损，甚至无法卖出。作者不提供投资建议，也不对任何资金损失负责。

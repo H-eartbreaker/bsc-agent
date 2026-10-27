@@ -28,7 +28,8 @@ function run(cmd, args, timeoutMs = 45_000) {
 }
 
 export const info = (token, wallet) => run('info', { token, wallet });
-export const quoteBuy = (token, wallet, amount, slippageBps) => run('quote-buy', { token, wallet, amount: String(amount), slippageBps });
+// payToken：不传 = 用 BNB 付（非 WBNB 计价币盘由 Core 的 ZapRouter 在同一笔里换成计价币）；传计价币地址 = 直接用钱包里的计价币付，amount 按计价币算
+export const quoteBuy = (token, wallet, amount, slippageBps, payToken = null) => run('quote-buy', { token, wallet, amount: String(amount), slippageBps, ...(payToken ? { payToken } : {}) });
 export const quoteSell = (token, wallet, amount, slippageBps) => run('quote-sell', { token, wallet, amount: String(amount), slippageBps });
 
 // 模拟失败 / 余额不够时给出明确原因，不发交易

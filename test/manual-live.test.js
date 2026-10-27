@@ -9,7 +9,7 @@ function fixture({ accept = true, fast = false, real = true } = {}) {
     S: { fast, tokens: new Map([['token', { symbol: 'COIN' }]]) },
     REAL: () => real, esc: String,
     ui: { confirm: async (data) => { confirmations.push(data); return accept; } },
-    fetch: async (url, opts) => { requests.push({ url, opts }); return { ok: true, json: async () => ({ status: 'pending' }) }; },
+    fetch: async (url, opts) => { requests.push({ url, opts }); return { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({ status: 'pending' }), text: async () => JSON.stringify({ status: 'pending' }) }; },
   });
   const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   vm.runInContext(source.slice(source.indexOf('const api ='), source.indexOf('let ws;')) + '\nglobalThis.callApi = api;', context);

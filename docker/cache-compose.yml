@@ -1,0 +1,30 @@
+# 历史数据缓存（可选）：MySQL + Redis，端口只开在本机 127.0.0.1。
+#   启动：BSC_AGENT_DB_PASSWORD=换一个密码 docker compose -f docker/cache-compose.yml up -d
+#   然后在 .env 里填：
+#     MYSQL_URL=mysql://bscagent:<同一个密码>@127.0.0.1:13306/bscagent
+#     REDIS_URL=redis://127.0.0.1:16379
+# 数据在 docker 卷 bsc-agent-mysql 里（删掉也没关系，只是缓存，会从链上 / 接口重新补）
+services:
+  bsc-agent-mysql:
+    image: mysql:8.4
+    container_name: bsc-agent-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: bscagent
+      MYSQL_USER: bscagent
+      MYSQL_PASSWORD: ${BSC_AGENT_DB_PASSWORD:?先设置 BSC_AGENT_DB_PASSWORD}
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    command: ["--innodb-buffer-pool-size=256M", "--max-connections=50", "--skip-name-resolve"]
+    ports:
+      - "127.0.0.1:13306:3306"
+    volumes:
+      - bsc-agent-mysql:/var/lib/mysql
+  bsc-agent-redis:
+    image: redis:7.4-alpine
+    container_name: bsc-agent-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:16379:6379"
+volumes:
+  bsc-agent-mysql:
