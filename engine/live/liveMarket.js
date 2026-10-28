@@ -416,7 +416,7 @@ export class LiveMarket extends EventEmitter {
   async loadFairSales() {
     const day = Date.now() / 1000 - 86_400;
     try {
-      const j = await fetch('https://gang.fun/api/v3/tokens?limit=100', { signal: AbortSignal.timeout(10_000) }).then((r) => r.json());
+      const j = await pfetch('https://gang.fun/api/v3/tokens?limit=100', { signal: AbortSignal.timeout(10_000) }).then((r) => r.json());
       for (const x of j?.items || []) {
         if (!x?.address || this.get(x.address) || (x.graduated && !(x.graduatedAt > day))) continue;
         const qa = String(x.quoteAddress || '').toLowerCase(), dec = Number(x.quoteDecimals) || 18;
@@ -865,9 +865,9 @@ export class LiveMarket extends EventEmitter {
         // 成交、全部历史、外盘 K 线三件事同时拉，不再一个等一个（进图更快）
         const jobs = []; let rebuilt = false;
         if (t.gangTrack === 'v3') jobs.push(Promise.race([this.gangV3History(t).then((n) => { if (n) this.emit('detail', t.address); }), new Promise((r) => setTimeout(r, 4000))]).catch(() => {}));
-        else if (t.stage !== 'dex' && (!t.gangAt || Date.now() - t.gangAt > 1500)) { t.gangAt = Date.now(); jobs.push(this.gang.trades(t.address, 200)); }   // 已发射的不再拉：内盘不会有新成交
+        else if (t.gangTrack !== 'v3fair' && t.stage !== 'dex' && (!t.gangAt || Date.now() - t.gangAt > 1500)) { t.gangAt = Date.now(); jobs.push(this.gang.trades(t.address, 200).catch(() => null)); }   // 成交接口偶尔失败不该让整个详情报「读取失败」   // 已发射的不再拉：内盘不会有新成交
         // 第一次选中：拉全部成交，从开盘起重建 K 线（也清掉改单位之前按 BNB 记的旧 K 线，全部是报价币单位）；10 分钟重建一次
-        if (t.gangTrack !== 'v3' && (!t.gangFullAt || Date.now() - t.gangFullAt > 600_000)) {
+        if (t.gangTrack !== 'v3' && t.gangTrack !== 'v3fair' && (!t.gangFullAt || Date.now() - t.gangFullAt > 600_000)) {
           t.gangFullAt = Date.now();
           jobs.push(this.gang.history(t.address).catch(() => null).then((rows) => {
             if (rows?.length) { const k = this.qScale(t); t.candles = []; for (const r of rows) if (r.price > 0) this.pushCandle(t, r.ts, r.price * k, r.bnb * k); t._chgAt = 0; rebuilt = true; }

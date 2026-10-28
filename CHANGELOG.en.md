@@ -4,6 +4,9 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.3.3
+- Fix: opening a gang.fun fair-launch ("Gang V3 打新") market showed "history failed to load". gang.fun has no trades endpoint for these markets (it returns "not found"), so the app no longer calls it; a failing trades request can no longer break the whole detail view, and gang.fun requests go through the proxy.
+
 ## 0.3.2
 - Fix: an old `.env` containing `MODE=sim` made the page show "demo account" and stopped it from working out of the box. The public version has no simulation mode and now always starts in live mode (sim is only allowed for development tests).
 - Automatic proxy detection: no need to type a proxy port any more. On startup the app tries a direct connection first, then reads the system proxy settings and probes common proxy ports (Clash, V2Ray…). If nothing works, the self-check page has an input box: paste the HTTP proxy address from your proxy app and click Save & test — it takes effect immediately, no restart. Avatars, pool size and charts depend on this.

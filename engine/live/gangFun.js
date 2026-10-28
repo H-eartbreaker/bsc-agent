@@ -4,6 +4,7 @@
 // 下单在 gangTrade.js：老盘（0x315B…23A7，BNB 计价）支持内盘买卖；V2 报价币盘只看行情。
 import { EventEmitter } from 'node:events';
 import { cache } from './cache.js';
+import { pfetch } from '../netProxy.js';
 
 const API = 'https://gang.fun/api';
 const LIST_MS = 5_000, LIST_SLOW_MS = 20_000, TRADES_MS = 10_000, HOT = 5;
@@ -36,7 +37,7 @@ export class GangFun extends EventEmitter {
 
   async get(path) {
     const wait = this.status.pausedUntil - Date.now(); if (wait > 0) await sleep(wait);
-    const res = await fetch(API + path, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15_000) });
+    const res = await pfetch(API + path, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15_000) });
     if (res.status === 429) { this.status.pausedUntil = Date.now() + 60_000; throw new Error('gang.fun 限流（429），暂停 1 分钟'); }
     if (!res.ok) throw new Error(`gang.fun HTTP ${res.status}`);
     return res.json();
