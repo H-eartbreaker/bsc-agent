@@ -677,3 +677,23 @@ input::placeholder { color: var(--dim); opacity: 1; }
 #pulse .tcard:hover .tc-n .tc-hide:hover, #tokenList.market-cards > .tcard:hover .tc-n .tc-hide:hover { color: #e6ebf1; background: rgba(255, 255, 255, .10); border-color: rgba(255, 255, 255, .28) !important; }   /* 纯灰白，不带红色 */
 #pulse .tc-n .tc-hide:active, #tokenList.market-cards .tc-n .tc-hide:active { transform: scale(.92); }
 #pulse .tc-n .tc-hide:focus-visible, #tokenList.market-cards .tc-n .tc-hide:focus-visible { outline: 2px solid var(--y); outline-offset: -2px; }
+
+/* 已开盘卡片：「已开盘 · DEX」并进时间/持有人那一行，不再多占一整行，三列卡片等高 */
+#pulse .tcard .tc-meta > .tc-route, #tokenList.market-cards .tc-meta > .tc-route { flex: 0 1 auto; min-width: 0; height: 18px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+#pulse .tcard .tc-who, #tokenList.market-cards .tc-who { min-width: 0; }
+#pulse .tcard .tc-who { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 代币详情头部：身份 / 价格 / 数据 / 说明 / 链接 全部排在同一行，放不下才整体换行 */
+#tokenHead.thead { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; padding: 14px 22px; }
+#tokenHead .asset-identity { flex: none; }
+#tokenHead .asset-summary { display: contents; }
+#tokenHead .asset-price { flex: none; }
+#tokenHead .asset-price > b { font-size: 22px; line-height: 1.15; letter-spacing: -.4px; white-space: nowrap; }
+#tokenHead .asset-price > div { margin-top: 2px; font-size: 12px; gap: 6px; white-space: nowrap; }
+#tokenHead .asset-stats { display: flex; gap: 18px; flex: none; }
+#tokenHead .asset-stats span { margin-bottom: 3px; }
+#tokenHead .asset-context { flex: 1 1 180px; min-width: 0; padding-top: 0; gap: 2px 10px; align-items: center; }
+#tokenHead .asset-context > span:first-child { max-width: 120px; }
+#tokenHead .asset-links { flex: none; margin-left: auto; flex-wrap: nowrap; }
+@media (max-width: 1100px) { #tokenHead .asset-context { flex-basis: 100%; order: 5; } #tokenHead .asset-links { order: 4; } }
+@media (max-width: 640px) { #tokenHead.thead { padding: 12px 16px; gap: 10px 16px; } #tokenHead .asset-price { flex-basis: 100%; } #tokenHead .asset-stats { width: 100%; justify-content: space-between; gap: 10px; } }

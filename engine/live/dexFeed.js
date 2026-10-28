@@ -5,7 +5,7 @@
 //   更早的历史：GeckoTerminal 分钟 K 线（currency=token，直接是报价币单位），从迁移时间往后翻页补齐，10 分钟重拉一次
 // 区块时间按每段首尾两个区块的时间戳插值（不逐块查），K 线够用。价格、金额都是报价币单位（和内盘 K 线一致）
 import { ethers } from 'ethers';
-import { pfetch } from '../netProxy.js';
+import { geckoJson, geckoCooldownMs } from './gecko.js';
 
 const FACTORY = '0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73';
 const WBNB = '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c';
@@ -46,12 +46,13 @@ export class DexFeed {
     if (t.dexHistAt && Date.now() - t.dexHistAt < 600_000) return false; t.dexHistAt = Date.now();
     const out = []; let before = '';
     for (let page = 0; page < 6; page++) {
-      const j = await (await pfetch(`https://api.geckoterminal.com/api/v2/networks/bsc/pools/${info.pair}/ohlcv/minute?aggregate=1&limit=1000&currency=token&token=${t.address}${before}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })).json();
+      const g = await geckoJson(`https://api.geckoterminal.com/api/v2/networks/bsc/pools/${info.pair}/ohlcv/minute?aggregate=1&limit=1000&currency=token&token=${t.address}${before}`);
+      if (g.limited) break; const j = g.j;
       const l = j?.data?.attributes?.ohlcv_list || []; if (String(j?.meta?.base?.address || '').toLowerCase() !== t.address.toLowerCase()) break;
       out.push(...l); if (l.length < 1000) break;
       const min = Math.min(...l.map((x) => x[0])); if (t.migratedAt && min * 1000 <= t.migratedAt) break; before = `&before_timestamp=${min}`;
     }
-    if (!out.length) { t.dexHistAt = Date.now() - 570_000; return false; }   // 没取到：30 秒后再试，不要等 10 分钟
+    if (!out.length) { t.dexHistAt = Date.now() - 600_000 + Math.max(30_000, geckoCooldownMs()); return false; }   // 没取到：30 秒后再试（被限流则等冷却结束），不要等 10 分钟
     const seen = new Set(); t.dexHist = out.filter((x) => !seen.has(x[0]) && seen.add(x[0])).sort((a, b) => a[0] - b[0]).map(([ts, o, h, l, c, v]) => ({ t: ts, o, h, l, c, v, dex: 1 }));
     return true;
   }

@@ -550,7 +550,7 @@ function filtered() {
     if (S.chips.has('other') && t.quote === 'BNB') return false;
     if (S.chips.has('traded') && !(t.buys + t.sells)) return false;
     if (S.chips.has('h1') && Date.now() - t.createdAt > 3600_000) return false;
-    if (!tcMatch('new', t)) return false;
+    if (col && !tcMatch(col, t)) return false;   // 每个标签用战壕里对应那一列的筛选；「我的」不筛
     return true;
   }).sort((a, b) => (S.listTab === 'soon' ? (trSort() === 'mc' ? (b.mcapUsd || 0) - (a.mcapUsd || 0) : b.progress - a.progress) : b.createdAt - a.createdAt || (a.address < b.address ? -1 : 1)));
 }
@@ -645,12 +645,12 @@ function renderHead() {
       ${logoHtml(t, 'lg')}
       <div class="asset-name"><div><b class="ctick" data-ctick="${esc(t.symbol)}">${esc(t.symbol)}</b><span class="asset-pair">/ ${esc(t.quote || 'BNB')}</span><span class="platform-label">${esc(platform)}</span></div>
       <button class="asset-address" data-copy="${t.address}" title="复制合约地址">${short(t.address, 6, 4)} <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></svg></button></div>
-      <div class="asset-links">${favStar(t.address)}${blockLinks(t)}<a href="#" data-ext="four">${esc(platform)}</a><a href="#" data-ext="bsc">BscScan</a><a href="#" data-ext="gmgn">GMGN</a><a href="#" data-qbtoggle title="打开快捷报价面板">快捷报价</a></div>
     </div>
     <div class="asset-summary"><div class="asset-price"><b>$${sub(t.priceUsd)}</b><div>${chgTxt(t.chg?.h1)}<span class="muted">1h 涨幅</span></div></div>
       <div class="asset-stats"><div><span>市值</span><b>${usd(t.mcapUsd)}</b></div><div><span>底池</span><b>${usd(t.liqUsd || 0)}</b></div><div><span>成交量</span><b>${bnb(t.volume, 2)} <small>${esc(t.quote || 'BNB')}</small></b></div><div><span>持有人</span><b>${t.holders ?? '—'}</b></div></div>
     </div>
-    <div class="asset-context"><span>${esc(t.name || t.symbol)}</span><span>${t.stage === 'dex' ? '已迁移' : '内盘'} · ${Number(t.progress || 0).toFixed(1)}%</span><span>费率 ${pctTxt(t.buyFeePct)} / ${pctTxt(t.sellFeePct)}</span><span>${age(t.createdAt)} 前创建</span>${ruleBanner(t.address)}</div>`;
+    <div class="asset-context"><span>${esc(t.name || t.symbol)}</span><span>${t.stage === 'dex' ? '已迁移' : '内盘'} · ${Number(t.progress || 0).toFixed(1)}%</span><span>费率 ${pctTxt(t.buyFeePct)} / ${pctTxt(t.sellFeePct)}</span><span>${age(t.createdAt)} 前创建</span>${ruleBanner(t.address)}</div>
+    <div class="asset-links">${favStar(t.address)}${blockLinks(t)}<a href="#" data-ext="four">${esc(platform)}</a><a href="#" data-ext="bsc">BscScan</a><a href="#" data-ext="gmgn">GMGN</a><a href="#" data-qbtoggle title="打开快捷报价面板">快捷报价</a></div>`;
 }
 
 /* ---------- K 线 ---------- */
@@ -2485,8 +2485,7 @@ function tcCard(t, k) {
       <div class="tc-n"><b class="ctick" data-ctick="${esc(t.symbol)}" title="${esc(t.symbol)}">${esc(t.symbol)}</b>${t.name && t.name !== t.symbol ? `<span title="${esc(t.name)}">${esc(t.name)}</span>` : ''}<button class="tc-fav ${isFav(t.address) ? 'on' : ''}" data-favq="${t.address}" aria-label="收藏 ${esc(t.symbol)}"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button><button class="tc-hide" data-block="${t.address}" aria-label="屏蔽 ${esc(t.symbol)}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m6 18 12-12"/></svg></button></div>
       <div class="tc-core"><i class="chip c-pool" title="底池配对币（池子里和代币配对的币）">${esc(t.quote || 'BNB')}</i>${taxChip(t, 'chip c-tax')}${modeChip(t, launchpad)}</div>
       <div class="tc-chips">${nftChip(t, 'chip')}${divChip(t, 'chip')}<span class="tc-quote" title="底池流动性">池 ${pool}</span>${t.agentExclusive ? '<span class="tc-agent">Agent</span>' : ''}</div>
-      <div class="tc-meta"><span title="创建时间">${age(t.createdAt)}</span><span class="tc-holders" title="持有人">${icon('holders')}${t.holders ?? '—'}</span><span title="成交笔数">${(t.buys || 0) + (t.sells || 0)} 笔</span></div>
-      ${curve ? '' : `<div class="tc-route dex" title="${routeTip}">${route}</div>`}
+      <div class="tc-meta"><span title="创建时间">${age(t.createdAt)}</span><span class="tc-holders" title="持有人">${icon('holders')}${t.holders ?? '—'}</span><span title="成交笔数">${(t.buys || 0) + (t.sells || 0)} 笔</span>${curve ? '' : `<span class="tc-route dex" title="${routeTip}">${route}</span>`}</div>
       <div class="tc-who" title="${esc(dev ? 'Dev ' + dev : '')}${fb ? ' · 首买 ' + esc(fb) : ''}">${dev ? 'Dev ' + esc(dev) : ''}${fb ? `<span>首买 ${esc(fb)}</span>` : ''}${hp ? `<span class="y">持有 ${K(hp.amount)}</span>` : ''}</div>
     </div>
     <button class="tc-r buyable ${st ? 'st-' + st : ''}" data-tqb="${t.address}:${k}" aria-label="${REAL() ? '买入' : LIVE() ? '预览买入报价' : '模拟买入'} ${esc(t.symbol)}" title="${REAL() ? '真实交易：点击买入' : LIVE() ? '只读报价：仅预览报价，不发送交易' : '模拟买入'}">

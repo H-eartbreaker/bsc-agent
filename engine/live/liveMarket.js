@@ -20,6 +20,7 @@ import { NameCache } from './names.js';
 import { ShrineFeeds, tokenInfo } from './shrine.js';
 import * as fsi from './fsi.js';
 import { cache } from './cache.js';
+import { geckoJson, geckoCooldownMs } from './gecko.js';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { getRoute, MIN_LIQ_USD } from './quoteRoutes.js';
 const FOUR_REG = dataFile('fourTokens.json');
@@ -755,8 +756,13 @@ export class LiveMarket extends EventEmitter {
         Object.assign(t, { pair: ps[0].pairAddress, dexLiqUsd: ps[0].liquidity?.usd || 0, dexMcapUsd: +ps[0].marketCap || +ps[0].fdv || 0, dexPriceUsd: +ps[0].priceUsd });
       }
       const q = this.quoteUsd(t); if (!q) return;
-      const j = await cache.fetchJson(`https://api.geckoterminal.com/api/v2/networks/bsc/pools/${t.dexPool}/ohlcv/minute?aggregate=1&limit=1000&currency=usd&token=${t.address}`, 15, { headers: { accept: 'application/json' } });
-      if (!j?.data) { t.dexNote = '外盘历史 K 线没取到（池子 ' + String(t.dexPool || '未找到').slice(0, 10) + '；返回：' + JSON.stringify(j ?? null).slice(0, 70) + '）会自动重试'; t.dexAt = 0; this.emit('detail', t.address); return; }   // 没拿到就别用「每分钟一个现价」假装是历史
+      const g = await geckoJson(`https://api.geckoterminal.com/api/v2/networks/bsc/pools/${t.dexPool}/ohlcv/minute?aggregate=1&limit=1000&currency=usd&token=${t.address}`, { ttl: 15 });
+      if (g.limited) {   // GeckoTerminal 免费额度限流：冷却期内不再请求，已有 K 线照常显示
+        const c = geckoCooldownMs(); t.dexNote = `外盘 K 线接口限流中（GeckoTerminal 免费额度），约 ${Math.ceil(c / 1000)} 秒后自动恢复${t.dexBars?.length ? '，已有 K 线照常显示' : ''}`;
+        t.dexAt = Date.now() + c - 5000; merge(); this.emit('detail', t.address); return;
+      }
+      const j = g.j;
+      if (!j?.data) { t.dexNote = '外盘历史 K 线没取到（池子 ' + String(t.dexPool || '未找到').slice(0, 10) + '；返回：' + JSON.stringify(j ?? null).slice(0, 70) + '）30 秒后自动重试'; t.dexAt = Date.now() + 25_000; this.emit('detail', t.address); return; }   // 没拿到就别用「每分钟一个现价」假装是历史   // 没拿到就别用「每分钟一个现价」假装是历史
       t.dexNote = '';
       let list = (j?.data?.attributes?.ohlcv_list || []).slice().sort((a, b) => a[0] - b[0]);
       // MySQL 缓存：分钟 K 线存下来，接口只给最近 1000 根，更早的从库里接上（重启后也在）
@@ -775,12 +781,11 @@ export class LiveMarket extends EventEmitter {
           try {
             let before = Math.min(...usd.keys()), fail = false;
             for (let pg = 0; pg < 12; pg++) {
-              const jj = await cache.fetchJson(`https://api.geckoterminal.com/api/v2/networks/bsc/pools/${pool}/ohlcv/minute?aggregate=1&limit=1000&currency=usd&token=${t.address}&before_timestamp=${before}`, 600, { headers: { accept: 'application/json' } }).catch(() => null);
+              const jj = (await geckoJson(`https://api.geckoterminal.com/api/v2/networks/bsc/pools/${pool}/ohlcv/minute?aggregate=1&limit=1000&currency=usd&token=${t.address}&before_timestamp=${before}`, { ttl: 600 }).catch(() => null))?.j;
               if (!jj?.data) { fail = true; break; }
               const l2 = jj.data.attributes?.ohlcv_list || []; if (!l2.length) break;
               for (const x of l2) usd.set(x[0], x); const mn = Math.min(...l2.map((x) => x[0]));
               if (l2.length < 1000 || mn >= before || (t.migratedAt && mn * 1000 <= t.migratedAt - 3_600_000)) break; before = mn;
-              await new Promise((r) => setTimeout(r, 2600));
             }
             if (!fail) t._deepPool = pool; t.dexAt = 0; this.emit('detail', t.address);
           } finally { t._deepBusy = false; }
