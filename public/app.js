@@ -2908,7 +2908,6 @@ setTimeout(() => { if (LIVE()) api('/api/snipe').then((v) => { SNP.log = v.log |
 // 自动转出（Flap 领取后 / Four 发射后 / Gang 发射后，全部转到固定地址）：顶部栏按钮 → 弹窗里三个开关分别设置。
 // 打开任何一个都要在确认弹窗里点确认；关闭直接生效
 const AS = [
-  { k: 'autoSendAfterClaim', name: 'Flap', what: 'Flap Agent 曲线发射后领取（claim）成功', how: '领到的全部代币' },
   { k: 'autoSendFourMigrated', name: 'Four', what: '你持有的 Four 代币从内盘发射（迁移到外盘）', how: '钱包里该币的全部余额' },
   { k: 'autoSendGangMigrated', name: 'Gang', what: '你持有的 Gang 代币（老盘和 V2 盘）从内盘发射（毕业）', how: '钱包里该币的全部余额' },
 ];
@@ -2934,7 +2933,7 @@ function openAutoSend() {
   wrap.innerHTML = `<div class="ui-dlg as-dlg" role="dialog" aria-modal="true"><div class="ui-h">⇢ 自动转出</div>
     <div class="ui-b"><div class="as-rows"></div><p style="margin-top:10px">转出地址（你自己的地址）：</p>
     <div class="ui-addr as-addr"></div>
-    <p class="ui-note">打开要确认；关闭立刻生效。只处理打开之后发生的发射 / 领取；每个币只转一次，失败自动重试；币安 App 要确认时会等你处理。交易哈希记在订单列表和该币的规则栏里。</p></div>
+    <p class="ui-note">打开要确认；关闭立刻生效。只处理打开之后发生的发射（迁移到外盘）；每个币只转一次，失败自动重试；币安 App 要确认时会等你处理。交易哈希记在订单列表和该币的规则栏里。</p></div>
     <div class="ui-f"><button class="ui-btn" data-close-as>关闭</button></div></div>`;
   document.body.appendChild(wrap); requestAnimationFrame(() => wrap.classList.add('in')); renderAutoSendDlg();
   const close = () => { document.removeEventListener('keydown', key, true); wrap.classList.remove('in'); setTimeout(() => wrap.remove(), 150); };
@@ -2943,7 +2942,7 @@ function openAutoSend() {
   wrap.addEventListener('mousedown', (e) => { if (e.target === wrap) close(); });
   wrap.addEventListener('click', async (e) => {
     if (e.target.closest('[data-close-as]')) return close();
-    const cp = e.target.closest('.ui-copy'); if (cp) { try { await navigator.clipboard.writeText(cp.dataset.v); cp.textContent = '已复制'; } catch { cp.textContent = '复制失败'; } return; }
+    const cp = e.target.closest('.ui-copy[data-v]'); if (cp) { try { await navigator.clipboard.writeText(cp.dataset.v); cp.textContent = '已复制'; } catch { cp.textContent = '复制失败'; } return; }
     if (e.target.closest('[data-editaddr]')) {
       const ad = $('.as-dlg .as-addr'); ad.style.flexDirection = 'column'; ad.style.alignItems = 'stretch';
       ad.innerHTML = '<input class="mono" id="asA1" placeholder="新的转出地址 0x…" spellcheck="false" autocomplete="off"><input class="mono" id="asA2" placeholder="再输入一次确认" spellcheck="false" autocomplete="off" style="margin-top:6px"><div style="margin-top:6px"><button class="ui-copy" data-saveaddr>保存</button> <button class="ui-copy" data-canceladdr>取消</button></div>';

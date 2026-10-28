@@ -4,6 +4,10 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.3.4
+- Auto-transfer: removed the "Flap after claim" switch, which had no transfer logic behind it. Only Four / Gang post-launch auto-transfer remains.
+- Fix: in Auto-transfer, "Set address" / "Change address" did nothing. The button was treated as a "copy" button; the address form now opens correctly.
+
 ## 0.3.3
 - Fix: opening a gang.fun fair-launch ("Gang V3 打新") market showed "history failed to load". gang.fun has no trades endpoint for these markets (it returns "not found"), so the app no longer calls it; a failing trades request can no longer break the whole detail view, and gang.fun requests go through the proxy.
 
