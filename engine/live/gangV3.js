@@ -6,7 +6,7 @@
 // - Buy / Sell 事件 topic 和 V2 相同（字段顺序也一样，tax 恒为 0）；Created 是新 topic（V3 8 字段 / 打新 13 字段）
 // 主网地址官方还没公布（CLI 里 MAINNET_GANG.pad = ''）：.env 填 GANG_V3_PAD，或者链上自动发现——
 // 按新的 Created topic 订阅全链，发出事件的合约 owner / pendingOwner 是 gang 部署钱包或平台多签才认，认过的存 data/gang-v3-pads.json。
-// 真实买卖默认关闭（只报价）：主网合约没核对过真实交易前不下单；.env 设 GANG_V3_TRADE=1 打开。打新币只显示，不交易。
+// 真实买卖默认开启；.env 设 GANG_V3_TRADE=0 可关闭（只报价）。打新币只显示，不交易。
 import { readFileSync, writeFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { ethers } from 'ethers';
@@ -14,7 +14,7 @@ import { env, dataFile } from './config.js';
 
 export const T_V3_CREATED = '0x416fe98c8f1ea2977674a1a4ee6252eb72597a8392fc2d7d0599a2bf5d8fdb63';     // Created(token, creator, name, symbol, logoURI, quote, refPair, gradAmt)
 export const T_FAIR_CREATED = '0xd46f0c9c36ad8c7839cf830c7cb08aa3a24392965d09cf84e5c8d3bf098d6a4f';   // 打新 Created（13 字段）
-export const V3_TRADE = env('GANG_V3_TRADE', '0') === '1';
+export const V3_TRADE = env('GANG_V3_TRADE', '1') === '1';
 // gang 的部署钱包和平台多签（仓库 config/GangDeployRefs.sol、MainnetAddresses.sol）
 const OFFICIAL = new Set(['0x4eedcdf5fab775e10c0d09951b6f59ab81ba19d3', '0x2866369f7acefc9760bde7779362fae5cd68b41e']);
 export const v3PadAbi = new ethers.Interface([

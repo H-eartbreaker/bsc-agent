@@ -370,7 +370,7 @@ export class LiveTrader extends EventEmitter {
   onCurve(t) { return t.stage === 'curve' && !t.migrated; }
   useGang(t) { return t.source === 'gang' && this.onCurve(t) && !['v2', 'v3', 'v3fair'].includes(t.gangTrack); }
   // gang.fun V2 报价币盘：先把 BNB 换成报价币再买，卖出后换回 BNB（非原子）
-  // V3（GangLaunchpad）曲线和 V2 同一套 buy / sell，也走这里（gangV2Pads 认 V3 内盘；真实买卖要 GANG_V3_TRADE=1）
+  // V3（GangLaunchpad）曲线和 V2 同一套 buy / sell，也走这里（gangV2Pads 认 V3 内盘；GANG_V3_TRADE=0 可关闭真实买卖）
   useGangV2(t) { return t.source === 'gang' && this.onCurve(t) && ['v2', 'v3'].includes(t.gangTrack); }
   // 打新币还在认购阶段（没开池）：买 = GangRouter.fairMintBNB 认购，卖 = pad.withdraw 按打新价退出（gangFair.js）；发射后 stage = dex，走外盘
   fairMinting(t) { return t.source === 'gang' && t.gangTrack === 'v3fair' && this.onCurve(t); }
