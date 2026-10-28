@@ -31,9 +31,11 @@
 - **Trenches:** New / Near Graduation / Launched columns covering Flap, Four and gang.fun (Gang V1 / V2 / V3 and fair launch). Every token card uses the same fixed layout: name → pool quote asset · tax · launch mode → pool size / tags → age · holders · trades → Dev / first buyer.
 - **Filters:** three presets (P1 / P2 / P3) per column; filter by platform, quote asset, age, market cap, holders, progress, tax and social links. Saved automatically.
 - **Charts and trades:** launched tokens merge on-chain trades with external-pool history; market cap / price toggle; 1s to 1h intervals; buy and sell markers.
+- **Market page:** the left tabs (In curve / Soon / Migrated / Mine) use the same filters as the matching trench columns; the token header shows price, change, market cap, liquidity, volume, holders, fees and platform links in a single row.
 - **Quick trade:** quick buy, sell-all, slippage, and allowance review / revoke. Trades go through Binance's aggregator and fall back to PancakeSwap V2 directly for brand-new pools the aggregator doesn't know.
 - **Tracking / copy trading:** follow smart-money addresses and copy their buys with your own amount, take-profit and stop-loss.
 - **gang.fun sniping:** buy new launches right away. You decide how much per buy, how many tokens per day (unlimited by default) and the auto-sell rules.
+- **Free-mint script:** `node scripts/free-mint.mjs 0xContract…` probes the free quantity, runs a `baw` preview safety check and only then mints; paid mints are only quoted, never executed; `--dry` checks without sending.
 - **Pause everything:** one button in the top-right stops tracking and sniping together.
 - **Self-check page:** wallet, live-trading switch and every module at a glance, with plain-language hints when something is wrong.
 - **Single wallet:** only the one Binance Agentic Wallet you sign in with. There are no multi-wallet options in the interface.

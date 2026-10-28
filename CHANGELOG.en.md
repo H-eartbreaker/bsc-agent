@@ -4,6 +4,21 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.3.6
+**Interface**
+- The token detail header is now a single row: logo / name / address, price and 1h change, market cap / liquidity / volume / holders, name / migration progress / fees / age, plus the star, BscScan, GMGN and quick-quote links on the right. It only wraps when the screen is too narrow.
+- Opened (migrated) trench cards: the "Opened · DEX" tag moved into the age / holders row instead of taking a full line, so all three columns have the same card height.
+
+**Fixes**
+- The "Migrated" tab in the left list always showed "No tokens": every tab used the "New" column's filter. Each tab now uses the filter of its matching trench column ("Mine" is not filtered).
+- "External-chart history unavailable" banner: GeckoTerminal's free API allows about 30 requests a minute and we retried every 5 seconds, which made the limit worse. All requests are now queued (≥ 2 s apart); after a 429 everything cools down for 60 s (doubling on repeats, max 5 min) with no requests during the cooldown. The page shows "recovers in ~N s" and existing candles keep rendering.
+
+**New: free-mint script** `scripts/free-mint.mjs`
+- Give it contract addresses: it finds the ABI (Sourcify, falling back to common mint / claim signatures), probes the free quantity with `value=0` simulations, runs a `baw contract-call preview` safety check (aborts on any charge, approval, risk flag or non-NFT inflow), and only then executes, reporting tokenId, tx hash and timings.
+- Free (0-value) mints only; paid mints are reported with their price and never executed. Usage: `node scripts/free-mint.mjs 0xContract Name=0xContract [--dry] [--max 10]`; `--dry` checks without sending. Logs go to `data/mint-logs/`.
+
+Restart the service and hard-refresh the page after upgrading.
+
 ## 0.3.5
 **Speed**
 - Transaction confirmation now polls all RPC nodes in parallel and uses the first receipt, so one slow or hung node no longer delays a trade.
