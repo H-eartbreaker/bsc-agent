@@ -1,7 +1,8 @@
 // Flap Agent Curve Portal：quoteBuy 计算份额，并用 baw contract-call preview 预演 buy(market,minShares)。
 // LIVE_TRADE=1 时 buy / sell 才会通过 baw contract-call execute 真实上链；非 BNB 底池走 BNB→报价币（baw market-order）→ approve → buyWithQuote。
 import { ethers } from 'ethers';
-import { PORTAL, FACTORY, ZERO, BNB_NATIVE } from './config.js';
+import { PORTAL, FACTORY, ZERO, BNB_NATIVE, RPC_LIST } from './config.js';
+import { waitReceipt } from './receipts.js';
 import * as baw from './baw.js';
 import { waitForContractConfirmation } from './app-confirmation.js';
 import { USDT, ONDO_RE, viaUsdt, markViaUsdt, waitReceived } from './quoteRoutes.js';
@@ -93,8 +94,7 @@ export class Portal {
     }
     if (!r.txHash) throw new Error(`${label} 没有返回 txHash（状态 ${r.status || '未知'}）`);
     step(`${label} 已广播 ${r.txHash.slice(0, 10)}…`, Date.now() - t, { tx: r.txHash, stage: 'broadcast' });
-    let rc = null;   // 每 150ms 查一次回执（BSC 出块约 0.75 秒；ethers 默认 4s 轮询太慢）
-    for (const end = Date.now() + 180_000; Date.now() < end; await sleep(150)) { rc = await this.provider.getTransactionReceipt(r.txHash).catch(() => null); if (rc) break; }
+    const rc = await waitReceipt(r.txHash, RPC_LIST, { timeoutMs: 180_000 });
     // 已经广播但 3 分钟没等到回执：不是失败，交给上层继续盯
     if (!rc) throw Object.assign(new Error(`${label} 已广播，3 分钟内还没确认：${r.txHash}`), { code: 'UNCONFIRMED', tx: r.txHash });
     if (rc.status !== 1) throw new Error(`${label} 链上执行失败：${r.txHash}`);

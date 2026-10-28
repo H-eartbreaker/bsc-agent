@@ -90,7 +90,7 @@ export class Holdings {
             const got = inn[tok] || 0, sent = out[tok] || 0;
             // 这笔交易里另一边的价值（BNB + 其他报价币折 BNB），以及用的报价币数量
             const other = (side) => { let bnb = side[BNB] || 0, qAmt = 0, qAddr = null; for (const [a, v] of Object.entries(side)) if (a !== tok && a !== BNB && qs.has(a) && v > 0) { bnb += v * this.rateAt(a, ts); qAmt += v; qAddr = a; } return { bnb, qAmt, qAddr }; };
-            const r = m.get(tok) || { buys: 0, sells: 0, boughtBnb: 0, soldBnb: 0, boughtUsd: 0, soldUsd: 0, feesUsd: 0, boughtQty: 0, boughtQuote: 0, quote: null, fees: 0, firstAt: Infinity, trades: [] };
+            const r = m.get(tok) || { buys: 0, sells: 0, boughtBnb: 0, soldBnb: 0, boughtUsd: 0, soldUsd: 0, feesUsd: 0, boughtQty: 0, soldQty: 0, lastAt: 0, boughtQuote: 0, quote: null, fees: 0, firstAt: Infinity, trades: [] };
             const px = this.usdAt(ts);
             if (got > 0) {
               const o = other(out); let v = o.bnb;
@@ -100,10 +100,10 @@ export class Holdings {
             } else if (sent > 0) {
               const o = other(inn); let v = o.bnb;
               if (!v && qs.has(tok)) v = sent * this.rateAt(tok, ts);   // 报价币拿去买了别的币：按当时汇率记作转出价值
-              r.sells++; r.soldBnb += v; r.soldUsd += v * px;
+              r.sells++; r.soldQty += sent; r.soldBnb += v; r.soldUsd += v * px;
               r.trades.push({ side: 'sell', ts, tokens: sent, bnb: v, usd: v * px, quoteAmt: o.qAmt || null, quote: o.qAddr, tx: h.txHash });
             } else continue;
-            r.fees += fee; r.feesUsd += fee * px; r.firstAt = Math.min(r.firstAt, ts); m.set(tok, r);
+            r.fees += fee; r.feesUsd += fee * px; r.firstAt = Math.min(r.firstAt, ts); r.lastAt = Math.max(r.lastAt, ts); m.set(tok, r);
           }
         }
       }
@@ -163,7 +163,7 @@ export class Holdings {
         // 美元：市值按现在的 BNB 价；成本 / 卖出按每笔成交当时的 BNB 价（钱包历史里有的），本程序订单记录只能按现价
         costUsd: h ? h.boughtUsd + h.feesUsd : cost * bnbUsd, soldUsd: h ? h.soldUsd : sold * bnbUsd, usdBasis: h ? 'trade' : 'current',
         pnlUsd: value != null ? value * bnbUsd + (h ? h.soldUsd : sold * bnbUsd) - (h ? h.boughtUsd + h.feesUsd : cost * bnbUsd) : null,
-        firstAt: h && isFinite(h.firstAt) ? h.firstAt : p.openedAt || null, source: h ? 'wallet' : 'app',
+        firstAt: h && isFinite(h.firstAt) ? h.firstAt : p.openedAt || null, lastAt: h?.lastAt || p.openedAt || null, boughtQty: h?.boughtQty || null, soldQty: h?.soldQty || 0, source: h ? 'wallet' : 'app',
         // 这个币同时是别的盘的报价币（如 GANG）：Gang V2 / Flap 买卖中间换出来的那部分也在这里，标出来方便换回 BNB
         isQuote: Object.keys(this.market.qUsd || {}).includes(lc(p.token)),
         trades: h ? h.trades.sort((a, b) => b.ts - a.ts).slice(0, 30) : [],

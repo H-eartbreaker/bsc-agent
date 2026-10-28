@@ -4,6 +4,19 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.3.5
+**Speed**
+- Transaction confirmation now polls all RPC nodes in parallel and uses the first receipt, so one slow or hung node no longer delays a trade.
+- Post-buy background pre-approval is capped to the held amount (not unlimited), so sells don't wait for an approval tx. Enable with `PREAPPROVE=1` in `.env`.
+
+**My Holdings**
+- Fixed the "My Holdings" tab always showing an empty table.
+- Restyled as a GMGN-like table: token / last active, bought, sold, balance, unrealized, total profit. Sell 25% / 50% / all, claim, swap back to BNB and per-token trade history are kept.
+- Removed the "hide dust / cleared" toggle and the Flap / Four / Gang platform filter, so every position is shown.
+- The Gang trench side panel no longer appears inside the bottom "My Holdings" tab.
+
+Restart the service and refresh the page after upgrading. The speed changes were not verified on-chain trade by trade; compare timings in `data/latency.jsonl`.
+
 ## 0.3.4
 - Auto-transfer: removed the "Flap after claim" switch, which had no transfer logic behind it. Only Four / Gang post-launch auto-transfer remains.
 - Fix: in Auto-transfer, "Set address" / "Change address" did nothing. The button was treated as a "copy" button; the address form now opens correctly.

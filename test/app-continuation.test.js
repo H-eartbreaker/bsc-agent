@@ -52,6 +52,7 @@ test('Portal send executes once, reports App message, waits and resumes instead 
     import assert from 'node:assert/strict'; import { Portal } from './engine/live/portal.js';
     const p=Object.create(Portal.prototype), steps=[];
     p.provider={getTransactionCount:async()=>9,getTransactionReceipt:async()=>({status:1})};
+    globalThis.fetch=async()=>({json:async()=>({result:{status:'0x1'}})});
     let waited=false;
     p.confirmPending=async intent=>{assert.equal(intent.nonce,9);assert.equal(intent.orderId,'original-order');waited=true;return '${hash('a')}'};
     const tx=await p.send({wallet:'${wallet}',to:'${venue}',inputData:'0xabcd',label:'sell',step:(name,ms,x)=>steps.push(x)});

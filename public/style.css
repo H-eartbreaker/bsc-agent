@@ -1613,3 +1613,5 @@ body.trkp-on .hg-open { left: calc(var(--trkpW, 340px) + 18px); }
 .tch .tc-sort button { height: 20px; padding: 0 7px; line-height: 20px; }
 .tch .tc-sort { height: 22px; }
 .sc-proxy { margin: 10px 0 4px; display: grid; gap: 6px; }
+.hold table.hold-gm td { padding-top: 7px; padding-bottom: 7px; vertical-align: middle; } .hold table.hold-gm .hc1 { font-weight: 600; } .hold table.hold-gm .hsub { line-height: 1.35; }
+#hold.in-bottom .hold-gang, #hold.in-bottom .hg-open { display: none !important; } #hold.hg-on.in-bottom { display: block; }

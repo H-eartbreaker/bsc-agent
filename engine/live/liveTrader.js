@@ -3,8 +3,9 @@
 import { EventEmitter } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
-import { PREAPPROVE, QUOTE_TOKENS, dataFile, EXPECT_WALLET } from './config.js';
+import { PREAPPROVE, QUOTE_TOKENS, dataFile, EXPECT_WALLET, RPC_LIST } from './config.js';
 import { setApprovalCtx, capFor, capLabel, sendApproval, listApprovals } from './approvals.js';
+import { waitReceipt } from './receipts.js';
 import { DRY_RUN, AUTH_SIMULATE_LOGGED_OUT, MAX_TRADE_BNB, LIVE_SETTINGS_FILE, BNB_NATIVE, BINANCE_CHAIN_ID, WALLET_LABEL, AUTO_TRANSFER_TO, AUTO_TRANSFER_FOUR } from './config.js';
 const AT_FILE = dataFile('autoTransfer.json');
 const RULE_FILE = dataFile('tokenRules.json');
@@ -820,7 +821,8 @@ export class LiveTrader extends EventEmitter {
     // 只认这一步自己的 txHash：order.pendingTx 可能是前面授权那笔（已上链），拿它判断会把还在等 App 确认的卖出误标成「已成交」
     if (e.tx) {
       const tx = e.tx;
-      while (Date.now() < end) { const rc = await (this.market.tradeProvider || this.market.provider).getTransactionReceipt(tx).catch(() => null); if (rc) return done(rc.status === 1 ? 'filled' : 'failed', rc.status === 1 ? '已上链确认' : `链上执行失败：${tx}`, tx); await sleep(3000); }
+      const rc = await waitReceipt(tx, RPC_LIST, { timeoutMs: end - Date.now() });
+      if (rc) return done(rc.status === 1 ? 'filled' : 'failed', rc.status === 1 ? '已上链确认' : `链上执行失败：${tx}`, tx);
       return done('unknown', `10 分钟内没等到确认，请在钱包记录里查看：${tx}`, tx);
     }
     while (Date.now() < end) { if ((await baw.walletLock().catch(() => 'UNKNOWN')) !== 'LOCKED') break; await sleep(10_000); }
@@ -934,13 +936,15 @@ export class LiveTrader extends EventEmitter {
       const i = await openFour.info(t.address, w.address);
       const core = i?.contracts?.core;
       if (!core) throw new Error('没拿到 Core 地址');
-      const erc = new ethers.Contract(t.address, ['function allowance(address,address) view returns (uint256)', 'function approve(address,uint256) returns (bool)'], this.market.provider);
-      const cur = await erc.allowance(w.address, core);
+      const erc = new ethers.Contract(t.address, ['function allowance(address,address) view returns (uint256)', 'function balanceOf(address) view returns (uint256)'], this.market.provider);
+      const [bal, cur] = await Promise.all([erc.balanceOf(w.address), erc.allowance(w.address, core)]);
       step(`查询授权 ${cur > 0n ? '已有' : '0'}`, Date.now() - t0);
-      if (cur >= ethers.MaxUint256 / 2n) { this.preapproving.delete(key); return; }   // 已足够，不发交易、不记录
+      if (bal <= 0n || cur >= bal) { this.preapproving.delete(key); return; }   // 没有持仓或已够用，不发交易、不记录
       this.orders.unshift(order); this.emit('order', order);
-      const hash = await this.portal.send({ wallet: w.address, to: t.address, inputData: erc.interface.encodeFunctionData('approve', [core, ethers.MaxUint256]), label: `授权 ${t.symbol}`, step });
-      Object.assign(order, { status: 'filled', tx: hash, txs: [hash], venue: 'approve(Core, max)', latencyMs: Date.now() - order.ts });
+      const cap = await capFor({ token: t.address, wallet: w.address, amount: bal, kind: 'sell' });
+      const hash = await sendApproval({ send: (o) => this.portal.send(o), wallet: w.address, token: t.address, spender: core, amount: bal, cap,
+        label: `授权 ${t.symbol}`, symbol: t.symbol, kind: 'sell', step });
+      Object.assign(order, { status: 'filled', tx: hash, txs: [hash], venue: `approve(Core, ${capLabel('sell')})`, latencyMs: Date.now() - order.ts });
     } catch (e) {
       Object.assign(order, { status: 'failed', reason: e.message, latencyMs: Date.now() - order.ts });
       if (!this.orders.includes(order)) this.orders.unshift(order);

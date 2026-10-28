@@ -272,7 +272,7 @@ function onMsg({ type, data, full }) {
     case 'blocklist': S.blk = data; afterBlock(); break;
     case 'favorites': setFav(data); break;
     case 'holdings': setHoldSnap(data); break;
-    case 'rules': S.rules = data || {}; scheduleRender(); if (S.view === 'hold') renderHold(); break;
+    case 'rules': S.rules = data || {}; scheduleRender(); if (holdOn()) renderHold(); break;
     case 'settings': S.settings = data; renderControls(); renderAutoSend(); break;
     case 'trackReload': loadTrack(); break;
     case 'track': if (!S.track.feed.some(r => r.id === data.id)) S.track.feed.unshift(data); S.track.feed = S.track.feed.slice(0, 300); renderTrack(); break;
@@ -612,7 +612,7 @@ function renderStatus() {
 // 交易页顶部：我的余额 / 盈亏（与战壕卡片同一套数据：价格 × 数量 × 计价币 USD）
 // 持仓行（和「持仓」页同一份数据：市值、成本都折成 BNB，报价币盘按汇率换算）。交易页每 15 秒最多拉一次
 // 持仓快照：服务器每 5 秒推一次（下单后马上推），本地也存一份，刷新页面后立刻有数，不用等接口
-function setHoldSnap(d) { if (!d) return; HOLD.data = d; HOLD.at = Date.now(); try { localStorage.setItem('holdSnap', JSON.stringify(d)); } catch { /* 太大或无痕模式就算了 */ } scheduleRender(); if (S.view === 'hold') renderHold(); renderQB(); if (S.selected && S.tokens.has(S.selected)) renderMyPos(S.tokens.get(S.selected)); if (S.bottomTab === 'pos' || S.bottomTab === 'allpos') renderBottom(); }
+function setHoldSnap(d) { if (!d) return; HOLD.data = d; HOLD.at = Date.now(); try { localStorage.setItem('holdSnap', JSON.stringify(d)); } catch { /* 太大或无痕模式就算了 */ } scheduleRender(); if (holdOn()) renderHold(); renderQB(); if (S.selected && S.tokens.has(S.selected)) renderMyPos(S.tokens.get(S.selected)); if (S.bottomTab === 'pos' || S.bottomTab === 'allpos') renderBottom(); }
 function holdRow(t) {
   if (!HOLD.data) { try { HOLD.data = JSON.parse(localStorage.getItem('holdSnap') || 'null'); HOLD.stale = true; } catch { /* ignore */ } }
   return HOLD.data?.rows?.find((r) => r.token.toLowerCase() === String(t.address).toLowerCase() && (!r.walletId || r.walletId === S.activeWallet)) || null;
@@ -814,6 +814,7 @@ function posTradesHtml(hr, t) {
 }
 // 「我的持仓」：把原来的整页持仓（汇总、兑换、筛选、表格）整块放进底部标签里，不用离开行情页
 const holdHome = document.createComment('hold-home');
+function holdOn() { return S.view === 'hold' || (S.view === 'trade' && S.bottomTab === 'myhold'); }
 function mountHold(on) {
   const b = $('#bottomBody'), hs = $('#hold'); if (!hs) return false;
   if (on) {
@@ -1729,7 +1730,7 @@ document.addEventListener('click', async (e) => {
     if (!(await ui.confirm({ title: `取消 ${r.symbol} 的规则？`, body: '<p>不再自动领取这个币。</p>', confirmText: '取消规则', cancelText: '保留' }))) return;
     S.rules = await api('/api/token-rules', { token: k, remove: true }); note(`已取消 ${r.symbol} 的规则`);
   } catch (err) { toast({ status: 'failed', symbol: '规则', reason: err.message }); }
-  scheduleRender(); if (S.view === 'hold') renderHold();
+  scheduleRender(); if (holdOn()) renderHold();
 }, true);
 
 // 左上角 Logo：在当前页进入战壕（推一条历史记录，后退能回到原来的页面）
@@ -1928,7 +1929,7 @@ async function swLoadInfo() {
   renderSwap();
 }
 function renderSwap() {
-  const box = $('#holdSwap'); if (!box || S.view !== 'hold' || !LIVE()) { if (box) box.innerHTML = ''; return; }
+  const box = $('#holdSwap'); if (!box || !holdOn() || !LIVE()) { if (box) box.innerHTML = ''; return; }
   const i = SW.info, buy = SW.dir === 'buy', w = wallet(S.activeWallet) || S.wallets[0];
   const fromSym = buy ? 'BNB' : (i?.symbol || '…'), toSym = buy ? (i?.symbol || '…') : 'BNB';
   const bal = buy ? (w?.bnb ?? 0) : Number(i?.balance || 0);
@@ -2208,7 +2209,7 @@ async function loadQuoteBal(force = true) {
   renderQuoteBal();
 }
 function renderQuoteBal() {
-  const box = $('#holdQuote'); if (!box || S.view !== 'hold') return;
+  const box = $('#holdQuote'); if (!box || !holdOn()) return;
   const sel = HOLD.wslot || 0, q = (HOLD.quote || []).filter((r) => !(r.valueUsd != null && r.valueUsd < 0.5) && (!sel || r.slot === sel));   // 价值不到 $0.5 的零头不显示（只是不显示，余额和换回逻辑不变）；切到某个钱包时先按已有数据筛，新数据回来再刷新
   const multi = !sel && (HOLD.data?.wallets || []).length > 1;
   if (!q.length && !HOLD.quoteErr) { box.innerHTML = ''; return; }
@@ -2283,34 +2284,34 @@ const usdSigned = (v) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}$${Math.ab
 const usdTip = (r) => (r.usdBasis === 'trade' ? '美元按每笔成交当时的 BNB/USDT 价格（币安小时 K 线）；余额按现价' : '这个币没有钱包历史，美元按现在的 BNB 价格估算');
 const ago = (ts) => { if (!ts) return '—'; const s = (Date.now() - ts) / 1000; return s < 3600 ? Math.round(s / 60) + ' 分钟' : s < 86400 ? (s / 3600).toFixed(1) + ' 小时' : (s / 86400).toFixed(1) + ' 天'; };
 function renderHold() {
-  if (S.view === 'hold' && LIVE() && !$('#holdSwap').dataset.ready) swLoadInfo();
-  const d = HOLD.data; if (!d || S.view !== 'hold') return;
-  const dust = $('#holdDust').checked;
-  $$('#holdPlats [data-hp]').forEach((c) => c.classList.toggle('off', !HOLD.plats.has(c.dataset.hp)));
-  const rows = d.rows.filter((r) => HOLD.plats.has(r.platform === 'four' || r.platform === 'gang' ? r.platform : 'flap') && (!dust || (r.amount > 0 && (r.valueBnb == null || r.valueBnb >= 0.0005)) || r.stage === 'claim'));
+  if (holdOn() && LIVE() && !$('#holdSwap').dataset.ready) swLoadInfo();
+  const d = HOLD.data; if (!d || !holdOn()) return;
+  const rows = d.rows;
   const T = d.totals || {};
-  // 「持仓中」按页面上实际显示的行数算；被「隐藏小额」藏起来的单独说明
-  const openRows = d.rows.filter((r) => r.amount > 0), shownOpen = rows.filter((r) => r.amount > 0).length, hiddenOpen = openRows.length - shownOpen;
+  const shownOpen = rows.filter((r) => r.amount > 0).length;
   const tip = '美元：市值按现在的 BNB 价；成本和卖出按每笔成交当时（所在小时）的 BNB/USDT 价格。所以美元盈亏 ≠ BNB 盈亏 × 现价，差额来自 BNB 本身涨跌';
   $('#holdTot').innerHTML = `${d.partial ? '<div class="y" role="status">部分钱包离线或数据未就绪，以下合计不完整</div>' : ''}<div><span>持仓市值</span><b>$${(T.valueUsd ?? (T.valueBnb || 0) * d.bnbUsd).toFixed(2)}</b> <span>${bnb(T.valueBnb || 0)} BNB</span></div>
     <div title="${tip}"><span>累计买入成本</span><b>$${(T.costUsd || 0).toFixed(2)}</b> <span>${bnb(T.costBnb || 0)} BNB</span></div><div title="${tip}"><span>累计卖出</span><b>$${(T.soldUsd || 0).toFixed(2)}</b> <span>${bnb(T.soldBnb || 0)} BNB</span></div>
     <div title="${tip}"><span>总盈亏（含已卖出）</span><b>${sgn(T.pnlUsd || 0, (v) => '$' + v.toFixed(2))}</b> <span>${T.costUsd > 0 ? sgn(((T.pnlUsd || 0) / T.costUsd) * 100, (v) => v.toFixed(1) + '%') : ''}</span></div>
-    <div><span>BNB 余额</span><b>${bnb(d.bnb || 0)}</b></div><div><span>更新于</span><b style="font-size:14px">${new Date(d.updatedAt || Date.now()).toLocaleTimeString('zh-CN', { hour12: false })}</b></div><div><span>持仓中</span><b>${shownOpen} 个</b>${hiddenOpen ? ` <a href="#" class="hsub" data-hshow>（另有 ${hiddenOpen} 个小额已隐藏 · 显示）</a>` : ''}</div>`;
+    <div><span>BNB 余额</span><b>${bnb(d.bnb || 0)}</b></div><div><span>更新于</span><b style="font-size:14px">${new Date(d.updatedAt || Date.now()).toLocaleTimeString('zh-CN', { hour12: false })}</b></div><div><span>持仓中</span><b>${shownOpen} 个</b></div>`;
   const stageTxt = (r) => (r.stage === 'claim' ? '<span class="tag y">可领取</span>' : r.stage === 'curve' ? '<span class="tag">内盘</span>' : '<span class="tag g">已迁移</span>');
   const canTrade = (r) => r.amount > 0;
-  $('#holdBody').innerHTML = rows.length ? `<table><tr><th class="l">代币</th><th class="l">状态</th><th>数量</th><th>占总量</th><th title="平均买入价（美元；悬停看报价币 / BNB 单价）">买入均价</th><th>市值</th><th>成本</th><th>已卖出</th><th>盈亏</th><th>卖出费率</th><th>首次买入</th><th class="l">操作</th></tr>
-    ${rows.map((r) => `<tr class="hrow" data-hold="${r.token}"><td class="l"><span class="side" data-a="${r.token}">${logoHtml({ ...r, address: r.token })}<span><b>${esc(r.symbol)}</b> <i class="pbadge" style="margin-left:4px">${r.platform === 'four' ? 'Four' : r.platform === 'gang' ? 'Gang' : 'Flap'}</i>${r.isQuote ? '<i class="pbadge" style="margin-left:4px;color:#f0b90b" title="这个币也是其他盘的报价币：Gang V2 / Flap 买卖时换出来、没换回 BNB 的部分会留在这里">计价币</i>' : ''}<div class="hsub">${esc(r.wallet || '')} · ${esc(r.name || '')}${r.source === 'app' ? ' · 成本按本程序订单' : ''}</div>${ruleBanner(r.token)}</span></span></td>
-      <td class="l">${stageTxt(r)}</td><td>${K(r.amount)}</td><td>${r.supplyPct != null ? r.supplyPct.toFixed(3) + '%' : '—'}</td><td title="${r.avgBuyQuote && r.quote !== 'BNB' ? sub(r.avgBuyQuote) + ' ' + esc(r.quote) : r.avgBuyBnb ? sub(r.avgBuyBnb) + ' BNB' : ''}">${r.avgBuyUsd ? '$' + sub(r.avgBuyUsd) : '—'}</td>
-      <td>${r.valueBnb != null ? `<span title="${bnb(r.valueBnb)} BNB${r.quote !== 'BNB' && r.price ? ` · ${K(r.amount * r.price)} ${esc(r.quote)}` : ''}">$${(r.valueUsd || 0).toFixed(2)}</span>` : `<span class="y" title="${esc(r.warn || '')}">— ⚠</span>`}</td><td title="${usdTip(r)}">$${(r.costUsd || 0).toFixed(2)}</td><td title="${usdTip(r)}">${r.soldBnb ? '$' + (r.soldUsd || 0).toFixed(2) : '$0'}</td>
-      <td title="${usdTip(r)}">${r.pnlUsd == null ? `<span class="muted" title="${esc(r.warn || '')}">—</span>` : sgn(r.pnlUsd, (v) => '$' + v.toFixed(2))}${r.pnlPct != null ? ' <span class="hsub">' + sgn(r.pnlPct, (v) => v.toFixed(1) + '%') + '</span>' : ''}</td><td class="${(S.tokens.get(r.token)?.sellFeePct || 0) >= 5 ? 'r' : ''}">${pctTxt(S.tokens.get(r.token)?.sellFeePct)}</td><td>${ago(r.firstAt)}</td>
+  const two = (top, bot, tip) => `<td${tip ? ` title="${tip}"` : ''}><div class="hc1">${top}</div><div class="hsub">${bot || '&nbsp;'}</div></td>`;
+  const unreal = (r) => (r.amount > 0 && r.valueUsd != null && r.avgBuyUsd ? r.valueUsd - r.avgBuyUsd * r.amount : null);
+  $('#holdBody').innerHTML = rows.length ? `<table class="hold-gm"><tr><th class="l">币种 / 最后活跃</th><th title="累计买入花费（美元）/ 买到的数量">当前买入</th><th title="累计卖出收入（美元）/ 卖出的数量">当前卖出</th><th>余额</th><th title="还拿着的这部分，现价 − 买入均价 × 数量">未实现</th><th title="${tip}">当前总利润</th><th class="l">操作</th></tr>
+    ${rows.map((r) => { const u = unreal(r); return `<tr class="hrow" data-hold="${r.token}"><td class="l"><span class="side" data-a="${r.token}">${logoHtml({ ...r, address: r.token })}<span><b>${esc(r.symbol)}</b> <i class="pbadge" style="margin-left:4px">${r.platform === 'four' ? 'Four' : r.platform === 'gang' ? 'Gang' : 'Flap'}</i> ${stageTxt(r)}${r.isQuote ? '<i class="pbadge" style="margin-left:4px;color:#f0b90b" title="这个币也是其他盘的报价币：Gang V2 / Flap 买卖时换出来、没换回 BNB 的部分会留在这里">计价币</i>' : ''}<div class="hsub">${esc(r.wallet || '')} · ${r.lastAt ? ago(r.lastAt) + '前' : '—'}${r.source === 'app' ? ' · 成本按本程序订单' : ''}</div>${ruleBanner(r.token)}</span></span></td>
+      ${two('$' + (r.costUsd || 0).toFixed(2), r.boughtQty ? K(r.boughtQty) : '', usdTip(r))}
+      ${two(r.soldBnb ? '$' + (r.soldUsd || 0).toFixed(2) : '$0', r.soldQty ? K(r.soldQty) : '', usdTip(r))}
+      ${r.valueBnb != null ? two('$' + (r.valueUsd || 0).toFixed(2), `${K(r.amount)}${r.supplyPct != null ? ' (' + r.supplyPct.toFixed(3) + '%)' : ''}`, `${bnb(r.valueBnb)} BNB`) : two(`<span class="y" title="${esc(r.warn || '')}">— ⚠</span>`, K(r.amount))}
+      <td>${r.amount > 0 ? (u == null ? '<span class="muted">—</span>' : sgn(u, (v) => '$' + v.toFixed(2))) : '<span class="muted">清仓</span>'}</td>
+      <td title="${usdTip(r)}">${r.pnlUsd == null ? `<span class="muted" title="${esc(r.warn || '')}">—</span>` : `<div class="hc1">${sgn(r.pnlUsd, (v) => '$' + v.toFixed(2))}</div><div class="hsub">${r.pnlPct != null ? sgn(r.pnlPct, (v) => v.toFixed(1) + '%') : '&nbsp;'}</div>`}</td>
       <td class="l acts">${r.stage === 'claim' && (!r.walletId || r.walletId === 'baw') ? `<button class="qb" data-claim="${r.claimMarket}">领取</button>` : ''}${canTrade(r) ? (r.isQuote ? `<button class="qb" data-hsell="${r.walletId}:${r.token}:100" title="全部换回 BNB">换回 BNB</button>` : [25, 50, 100].map((p) => `<button class="qb" style="color:var(--r)" data-hsell="${r.walletId}:${r.token}:${p}">${p === 100 ? '清仓' : '卖' + p + '%'}</button>`).join('')) : ''}</td></tr>
-      ${HOLD.open.has(r.token) ? `<tr class="hist"><td colspan="12">${r.trades.length ? r.trades.map((x) => `<div class="hsub"><span class="${x.side === 'buy' ? 'g' : 'r'}">${x.side === 'buy' ? '买入' : '卖出'}</span> ${new Date(x.ts).toLocaleString('zh-CN', { hour12: false })} · ${K(x.tokens)} 个 · ${bnb(x.bnb)} BNB · ${txLink(x.tx)}</div>`).join('') : '<span class="hsub">钱包历史里没有这笔持仓的买卖记录（Flap 曲线份额只记录本程序下的单）</span>'}</td></tr>` : ''}`).join('')}</table>`
+      ${HOLD.open.has(r.token) ? `<tr class="hist"><td colspan="7">${r.trades.length ? r.trades.map((x) => `<div class="hsub"><span class="${x.side === 'buy' ? 'g' : 'r'}">${x.side === 'buy' ? '买入' : '卖出'}</span> ${new Date(x.ts).toLocaleString('zh-CN', { hour12: false })} · ${K(x.tokens)} 个 · ${bnb(x.bnb)} BNB · ${txLink(x.tx)}</div>`).join('') : '<span class="hsub">钱包历史里没有这笔持仓的买卖记录（Flap 曲线份额只记录本程序下的单）</span>'}</td></tr>` : ''}`; }).join('')}</table>`
     : `<div class="empty">${HOLD.err ? esc(HOLD.err) : '暂无持仓'}</div>`;
 }
 document.addEventListener('click', (e) => {
   const chip = e.target.closest('#holdPlats [data-hp]');
   if (chip) { const p = chip.dataset.hp; if (HOLD.plats.has(p)) { if (HOLD.plats.size > 1) HOLD.plats.delete(p); } else HOLD.plats.add(p); try { localStorage.setItem('holdPlats', JSON.stringify([...HOLD.plats])); } catch { /* ignore */ } return renderHold(); }
-  if (e.target.closest('[data-hshow]')) { e.preventDefault(); $('#holdDust').checked = false; return renderHold(); }
   const q2a = e.target.closest('[data-q2ball]'); if (q2a) { e.stopPropagation(); q2a.disabled = true; quoteSweepAll().finally(() => { q2a.disabled = false; }); return; }
   const q2b = e.target.closest('[data-q2b]'); if (q2b) { e.stopPropagation(); q2b.disabled = true; quoteToBnb(q2b.dataset.q2b, Number(q2b.dataset.q2bslot) || 0).finally(() => { q2b.disabled = false; }); return; }
   const sell = e.target.closest('[data-hsell]');
@@ -2319,11 +2320,10 @@ document.addEventListener('click', (e) => {
   const a = e.target.closest('[data-a]'); if (a && a.closest('#hold')) { e.stopPropagation(); const t = S.tokens.get(a.dataset.a) || [...S.tokens.values()].find((x) => x.address.toLowerCase() === a.dataset.a.toLowerCase()); if (t) return openToken(t); setView('trade'); return select(a.dataset.a); }
   const row = e.target.closest('tr.hrow'); if (row) { const k = row.dataset.hold; HOLD.open.has(k) ? HOLD.open.delete(k) : HOLD.open.add(k); renderHold(); }
 }, true);
-$('#holdDust').addEventListener('change', renderHold);
 $('#holdRefresh').addEventListener('click', () => loadHold(true));
-setInterval(() => { if (S.view === 'hold') loadHold(); }, 12_000);
+setInterval(() => { if (holdOn()) loadHold(); }, 12_000);
 // 订单结束后持仓页也跟着刷新（服务端会在 3 / 5 / 20 秒重读链上余额）
-for (const ms of [4000, 8000, 22000]) window.addEventListener('order-done', () => setTimeout(() => { if (S.view === 'hold') loadHold(); }, ms));
+for (const ms of [4000, 8000, 22000]) window.addEventListener('order-done', () => setTimeout(() => { if (holdOn()) loadHold(); }, ms));
 
 /* ---------- 战壕：三列（新创建 / 即将打满 / 已开盘），每列自己的搜索、快捷买入金额、P1-P3 预设、声音、隐藏、筛选 ---------- */
 const PLATS = ['flap', 'four', 'gang'];
@@ -2567,7 +2567,7 @@ function renderHoldGang() {
   if (!HG) return;   // 启动时路由先进持仓页，这里还没初始化
   const box = $('#holdGang'), body = $('#hgBody'); if (!box || !body) return;
   box.classList.toggle('hidden', !HG.open); $('#hgOpen')?.classList.toggle('hidden', HG.open); $('#hold')?.classList.toggle('hg-on', HG.open);
-  if (!HG.open || S.view !== 'hold') return;
+  if (!HG.open || !holdOn()) return;
   const list = [...S.tokens.values()].filter((t) => t.platform === 'gang' && t.stage === 'curve' && !isBlocked(t)).sort((a, b) => b.createdAt - a.createdAt || (a.address < b.address ? -1 : 1));
   $('#hgCnt').textContent = list.length;
   const ago = (Date.now() - (S.net.detectAt || 0)) / 1000;
@@ -2598,7 +2598,7 @@ $('#hgClose')?.addEventListener('click', (e) => { e.stopPropagation(); setHoldGa
 $('#hgOpen')?.addEventListener('click', () => setHoldGang(true));
 $('#hgBody')?.addEventListener('mouseenter', () => { HG.paused = true; });
 $('#hgBody')?.addEventListener('mouseleave', () => { HG.paused = false; renderHoldGang(); });
-setInterval(() => { if (S.view === 'hold') renderHoldGang(); }, 1000);
+setInterval(() => { if (holdOn()) renderHoldGang(); }, 1000);
 
 // ⚡：金额 > 0 买这一列设置的 BNB；金额 = 0 按 1% 筹码买（沿用原来的「买 1%」逻辑）
 async function trenchBuy(addr, k) {
