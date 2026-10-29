@@ -1,6 +1,6 @@
 {
   "name": "bsc-agent",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "本地运行的 BSC Agent 内盘快速买卖终端（Flap / Four / gang.fun），通过币安 Agentic Wallet（baw）下单；默认模拟盘",
   "main": "server.js",
   "type": "module",
@@ -13,11 +13,15 @@
     "testnet:info": "node scripts/testnet-info.js",
     "live": "MODE=live node server.js",
     "live:readonly": "MODE=live LIVE_TRADE=0 NODE_USE_ENV_PROXY=1 node server.js",
+    "live:8788": "MODE=live LIVE_TRADE=1 AUTO_TRANSFER_FOUR=0 PORT=8788 node server.js",
+    "sim:8787": "MODE=sim PORT=8787 node server.js",
+    "live:wallet2": "BINANCE_BAW_DIR=$HOME/.baw-wallet2 BINANCE_INSTANCE_ID=bsc-agent-wallet2 DATA_DIR=./data-wallet2 WALLET_SLOT=2 WALLET_LABEL='钱包 2' WALLET_PEERS='[]' FEEDS_PUBLIC=1 MODE=live LIVE_TRADE=1 PORT=8789 node server.js",
     "setup": "bash install.sh"
   },
   "dependencies": {
     "ethers": "6.17.0",
     "express": "5.1.0",
+    "telegram": "^2.26.22",
     "ws": "8.22.0"
   },
   "license": "MIT",

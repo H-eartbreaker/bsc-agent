@@ -113,6 +113,7 @@ export class WalletFleet {
     const parts = [{ slot: this.slot, label: this.label, snap: this.cache.find(w => w.slot === this.slot)?.auth === 'ok' ? own : null }, ...this.peers.map(p => ({ slot: p.slot, label: p.label, snap: this.snapshots.get(p.slot)?.holdings }))];
     const rows = parts.flatMap(p => (p.snap?.rows || []).map(r => ({ ...r, walletId: this.id(p.slot), wallet: p.label, walletSlot: p.slot })));
     const totals = {}; for (const p of parts) for (const [key, value] of Object.entries(p.snap?.totals || {})) if (typeof value === 'number') totals[key] = (totals[key] || 0) + value;
-    return { ...own, rows, totals, bnb: this.cache.filter(w => w.auth === 'ok').reduce((n, w) => n + w.bnb, 0), wallets: parts.map(p => ({ slot: p.slot, label: p.label, available: !!p.snap })), partial: parts.some(p => !p.snap) };
+    const realized = parts.flatMap(p => (p.snap?.realized || []).map(r => ({ ...r, walletId: this.id(p.slot), wallet: p.label, walletSlot: p.slot })));
+    return { ...own, rows, realized, totals, bnb: this.cache.filter(w => w.auth === 'ok').reduce((n, w) => n + w.bnb, 0), wallets: parts.map(p => ({ slot: p.slot, label: p.label, available: !!p.snap })), partial: parts.some(p => !p.snap) };
   }
 }

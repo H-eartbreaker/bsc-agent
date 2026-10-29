@@ -66,8 +66,8 @@ export class LiveTrader extends EventEmitter {
       autoSendFourMigrated: !!SEND_TO && loadSaved().autoSendFourMigrated === true,
       autoSendGangMigrated: !!SEND_TO && loadSaved().autoSendGangMigrated === true,
       qbPresets: loadSaved().qbPresets || null,
-      sellToBnb: loadSaved().sellToBnb === true,
-      preApproveCap: loadSaved().preApproveCap === true, walletOn: loadSaved().walletOn || {} };   // 预先授权（较大固定额度，用户可在页面关闭）；关掉 = 只授权本次数量   // 卖出后自动把报价币（BNCB / GANG / 币股…）换回 BNB，默认关，可在交易设置里打开   // 一键买卖面板的预设金额 / 比例（页面上编辑，存 live-settings.json）   // Gang 发射（毕业）后自动转出，同样只能本人打开   // Four 发射后自动转出（同样只能本人在页面打开）
+      sellToBnb: true,
+      preApproveCap: true, walletOn: loadSaved().walletOn || {} };   // 按当前产品规则固定开启：卖出后换回 BNB，并记住授权额度
     this.claimable = []; this.claimRetry = new Map(); this.claiming = new Set(); this.inflight = new Set();
     this.tokenQ = new Map(); this.dupAt = new Map();
     this.preapproving = new Set();

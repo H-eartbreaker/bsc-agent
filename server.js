@@ -28,6 +28,11 @@ import { dataFile } from './engine/live/config.js';
 import { cache } from './engine/live/cache.js';
 import { fairPctBnb } from './engine/live/gangFair.js';
 import { mountUpdater } from './engine/updater.js';
+import { NftPortfolio } from './engine/live/nftPortfolio.js';
+import { nftFeedList, nftFeedOne, readNftFeed } from './engine/nft/feedApi.js';
+import { readMintHistory, summarize } from './engine/nft/mintLog.js';
+import { AutoMint, scriptRunner } from './engine/nft/autoMint.js';
+import { WatchSupervisor } from './engine/nft/watchSupervisor.js';
 
 // 日志脱敏：控制台 / live.log 里出现的 RPC 地址（含 NodeReal key）一律打码
 for (const k of ['log', 'info', 'warn', 'error']) { const f = console[k].bind(console); console[k] = (...a) => f(...a.map((x) => (typeof x === 'string' ? redactSecrets(x) : x instanceof Error ? redactSecrets(x.stack || x.message) : x))); }
@@ -35,6 +40,19 @@ for (const k of ['log', 'info', 'warn', 'error']) { const f = console[k].bind(co
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
 const API_TOKEN = loadApiToken(new URL('./data/api-token', import.meta.url));
+const NFT_FEED_FILE = path.join(__dirname, 'data', 'nft-feed.json');
+const MINT_LOG_DIR = path.join(__dirname, 'data', 'mint-logs');
+const nftAuto = new AutoMint({
+  feedFile: NFT_FEED_FILE, stateFile: path.join(__dirname, 'data', 'nft-automint.json'), readFeed: readNftFeed, log: (m) => console.log(m),
+  runner: scriptRunner({ script: path.join(__dirname, 'scripts', 'free-mint.mjs'), cwd: __dirname, env: () => nftChildEnv() }),
+});
+const nftChildEnv = () => {
+  const env = { ...process.env, FREE_MINT_SOURCE: 'auto' };
+  const proxy = process.env.BSC_AGENT_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy;
+  if (proxy) { env.HTTPS_PROXY ||= proxy; env.HTTP_PROXY ||= proxy; env.NODE_USE_ENV_PROXY = '1'; }
+  return env;
+};
+const nftWatcher = new WatchSupervisor({ root: __dirname, log: (m) => console.log(m) });
 
 // MODE=live：真实行情（shrine + Flap Agent Curve Reader + fsi）+ baw 报价/预演；再加 LIVE_TRADE=1 才能真实下单；自动还需本人开启策略
 const LIVE = MODE === 'live';
@@ -152,6 +170,20 @@ app.post('/api/auth/check', async (req, res) => res.json(LIVE ? await trader.che
 setTimeout(() => { for (const o of [...trader.orders].reverse()) latency.record(o); }, 5000);   // 启动时把内存里已有订单补记一次（按 id/tx 去重）
 app.get('/api/latency-stats', (req, res) => res.json(latency.stats(Math.max(0.01, Number(req.query.days) || 1))));
 app.get('/api/state', (req, res) => res.json({ ...state(), holdings: holdView(), orders: fleet ? fleet.orderViews(trader.orders).slice(0, 100) : trader.orders.slice(0, 100), logs: agent.logs.slice(0, 150), records: agent.records, flow: market.named ? market.named(market.flow.slice(0, 80)) : market.flow.slice(0, 80) }));
+app.get('/api/nft/feed', (req, res) => res.json({ rows: nftFeedList(NFT_FEED_FILE, { eligible: req.query.eligible === '1', since: req.query.since, limit: req.query.limit }), updatedAt: Date.now(), execution: { mode: 'preview', sendsTransactions: false } }));
+app.get('/api/nft/feed/:contract', (req, res) => { const row = nftFeedOne(NFT_FEED_FILE, req.params.contract); row ? res.json(row) : res.status(404).json({ error: '没有找到这个 NFT 项目' }); });
+app.get('/api/nft/mint-history', (req, res) => {
+  const since = Math.max(0, Number(req.query.since) || 0), rows = readMintHistory(MINT_LOG_DIR, { limit: req.query.limit, since });
+  res.json({ rows, summary: summarize(rows) });
+});
+// NFT 自动 mint 任务（免费才自动；付费永远手动）。开启后真实发送免费 mint；规则里勾「试运行」则只检查
+app.get('/api/nft/auto', (req, res) => res.json({ ...nftAuto.view(), canExecute: LIVE && LIVE_TRADE, watcher: nftWatcher.status() }));
+app.post('/api/nft/auto', (req, res) => {
+  const b = req.body || {};
+  const nextOn = typeof b.enabled === 'boolean' ? b.enabled : nftAuto.state.enabled, nextDry = typeof b.rules?.dry === 'boolean' ? b.rules.dry : nftAuto.state.rules.dry;
+  if (nextOn && !nextDry && !(LIVE && LIVE_TRADE)) return res.status(400).json({ error: '当前是只看不下单模式（LIVE_TRADE=0），只能用试运行' });
+  res.json({ ...nftAuto.configure({ enabled: typeof b.enabled === 'boolean' ? b.enabled : undefined, rules: b.rules && typeof b.rules === 'object' ? b.rules : undefined }), canExecute: LIVE && LIVE_TRADE, watcher: nftWatcher.status() });
+});
 
 // 地址追踪与跟单：新任务默认暂停 + 模拟，只有用户明确启动后才会运行。
 let tracker = null;
@@ -194,6 +226,7 @@ app.post('/api/pause-everything', (req, res) => {
   const done = [];
   try { if (tracker) { tracker.setAllPaused(true); done.push('跟单'); } } catch {}
   try { if (typeof sniper !== 'undefined' && sniper?.enabled) { sniper.setEnabled(false); done.push('狙击'); } } catch {}
+  try { if (nftAuto.view().enabled) { nftAuto.configure({ enabled: false }); done.push('NFT 自动 mint'); } } catch {}
   res.json({ ok: true, paused: done });
 });
 // 系统自检：一眼看出哪里没配好（只返回是/否和说明，不含地址、余额、名字）
@@ -252,6 +285,13 @@ app.get('/api/holdings', async (req, res) => {
   if (!holdings) return res.json({ rows: [], totals: {}, bnb: 0 });
   if (req.query.refresh) { trader.syncAt = 0; await trader.refreshBalance?.().catch(() => {}); await trader.syncHoldings?.().catch(() => {}); await holdings.loadHistory(true).catch(() => {}); holdSnap = await holdings.view(); broadcast({ type: 'holdings', data: holdView() }); return res.json(holdView()); }
   if (!holdSnap) holdSnap = await holdings.view(); res.json(holdView());
+});
+const nftPortfolio = new NftPortfolio({ directory: path.join(__dirname, 'data', 'mint-logs'), provider: market.provider });
+app.get('/api/nft-holdings', async (req, res) => {
+  if (!LIVE) return res.json({ rows: [], scope: '模拟盘不读取 NFT' });
+  const wallet = trader.wallets?.[0]?.address;
+  const result = await nftPortfolio.read(wallet);
+  res.json({ ...result, wallet: wallet || null, walletLabel: WALLET_LABEL });
 });
 // ---------- 兼容层：把他的多钱包写法接到你的 WalletFleet 上 ----------
 const loginView = (l) => (l ? { id: l.id, state: l.state, urlForWeb: l.urlForWeb, pairingCode: l.pairingCode, expireAt: l.expireAt, message: l.message, address: l.address || null } : null);
@@ -617,7 +657,7 @@ app.post('/api/settings', (req, res) => {
   for (const [k, n] of [['autoSendAfterClaim', '领取后'], ['autoSendFourMigrated', 'Four 发射后'], ['autoSendGangMigrated', 'Gang 发射后']])
     if (LIVE && rest[k] !== undefined) { trader.settings[k] = rest[k] === true; trader.saveSetting(k, trader.settings[k]); console.log(`[settings] ${n}自动转出 ${trader.settings[k] ? '打开' : '关闭'}`); }
   // 只接受已知的设置项，并且先校验再写入（以前先 Object.assign 再校验：格式错的预设会留在内存里直到重启，任意键也能写进 settings）
-  if (rest.qbPresets !== undefined) { const q = rest.qbPresets; const ok = q && ['buy', 'sell'].every((k) => Array.isArray(q[k]) && q[k].length === 3 && q[k].every((a) => Array.isArray(a) && a.length === 8 && a.every((v) => Number(v) > 0 && Number(v) <= (k === 'sell' ? 100 : 1000))));
+  if (rest.qbPresets !== undefined) { const q = rest.qbPresets; const ok = q && ['buy', 'sell'].every((k) => Array.isArray(q[k]) && q[k].length === 3 && q[k].every((a) => Array.isArray(a) && a.length === 3 && a.every((v) => Number(v) > 0 && Number(v) <= (k === 'sell' ? 100 : 1000))));
     if (!ok) return res.status(400).json({ error: '预设格式不对' }); }
   if (rest.gas !== undefined) { if (!GAS_PRESETS[rest.gas]) return res.status(400).json({ error: 'gas 档位不对' }); trader.settings.gas = rest.gas; }
   if (rest.execPath !== undefined) trader.settings.execPath = rest.execPath === 'ai' ? 'ai' : 'direct';
@@ -707,4 +747,5 @@ server.listen(PORT, process.env.HOST || '127.0.0.1', () => {
   console.log(`\n  BSC Agent（${!LIVE ? '模拟盘' : LIVE_TRADE ? `实盘 · 手动可下单，自动策略开启后可下单 · 单笔上限 ${trader.status.maxTradeBnb || '不限'} BNB` : '实盘行情 · 只报价不下单'}）`);
   if (LIVE) console.log(`  baw：${trader.status.connected ? `已连接 ${trader.wallets[0].address}` : `未连接（${trader.status.error}）`}`);
   console.log(`  ➜  http://localhost:${PORT}\n`);
+  nftAuto.start(); nftWatcher.start();
 });

@@ -60,7 +60,7 @@ function runBawOnce(args, { timeoutMs = 90_000, signal, onChild } = {}) {
     return Promise.reject(Object.assign(new Error('只读模式禁止发送交易、转账或修改授权'), { code: 'READ_ONLY' }));
   }
   return new Promise((resolve, reject) => {
-    const child = execFile(BAW_BIN, ['--json', ...args], { signal, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: process.env }, (err, stdout, stderr) => {
+    const child = execFile(BAW_BIN, ['--json', ...args], { signal, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: process.env, shell: process.platform === 'win32' }, (err, stdout, stderr) => {   // Windows 上 baw 是 .cmd，必须经过 shell
       const text = String(stdout || '').trim();
       let parsed = null;
       if (text) { try { parsed = JSON.parse(text); } catch { /* 非 JSON */ } }

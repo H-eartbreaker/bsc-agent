@@ -42,7 +42,7 @@
 - **单钱包**：只用你登录的那一个币安 Agentic Wallet，界面里不会出现多钱包的选项。
 
 ## 3 分钟上手
-**环境**：macOS 或 Linux，Node.js 22 或更新。
+**环境**：macOS、Linux 或 Windows，Node.js 22 或更新。
 
 ```bash
 git clone https://github.com/H-eartbreaker/bsc-agent.git
@@ -50,6 +50,8 @@ cd bsc-agent
 ./install.sh      # 检查 Node、装依赖、生成 .env、安装币安钱包命令行 baw
 ./start.sh        # 启动并自动打开 http://localhost:8787
 ```
+
+**Windows**：安装好 [Node.js 22+](https://nodejs.org) 后，下载/克隆本项目，双击 `install.bat`，再双击 `start.bat`（或在 PowerShell 里运行）。
 
 首次打开会弹出**新手引导 + 自检**，按顺序做：
 1. **登录币安钱包**：打开页面后，中间会自动弹出登录窗口，点「**登录币安钱包**」→ 打开它给的链接 → 核对配对码 → 在**币安 App** 里确认，页面会自动检测，不用敲命令。（没装币安钱包工具时，窗口里会直接给出安装命令，点「复制」粘贴到终端即可。）
@@ -109,6 +111,16 @@ cd bsc-agent
 | `BSC_AGENT_UPDATE_REPO` | 官方仓库 | 新版本提醒检查的仓库 |
 | `BSC_AGENT_UPDATE` | 开 | 设 `0` 关闭新版本提醒 |
 | `MYSQL_URL` / `REDIS_URL` | 空 | 可选历史数据缓存，`scripts/enable-cache.sh` 可一键用 Docker 起 |
+
+## NFT 雷达与自动 mint（可选）
+监听 Telegram 新项目频道，把「免费 + 有 Agent ID」的项目列在页面「NFT」里，可以开**自动 mint**。不用就什么都不用填。
+
+1. 到 <https://my.telegram.org> 申请 `api_id` / `api_hash`，填进 `.env` 的 `TG_API_ID`、`TG_API_HASH`，再填要监听的频道 `TG_CHANNEL_ID`（命令行登录时会列出频道 id）。
+2. 运行 `node scripts/tg-login.mjs` 登录一次（会生成本机的 `data/tg-session.txt`，**不要分享、不要提交**）。
+3. 重启服务，打开页面「NFT」→ 任务管理，设好规则后打开自动 mint。
+
+规则：只 mint **免费**的（`value=0`），付费的永远只提示、不自动执行；每笔先过 `baw contract-call preview` 安全检查，只花 gas。可按官网 / X 条件筛选、设排除关键词，页面里能看成功 / 失败报告和累计 mint 数据。自动任务**重启后不会自动恢复**，需要手动再打开。
+> 目前解析器按 Aibot 频道的消息格式写，其它格式的频道可能解析不到。
 
 ## 常见问题
 - **代币没有头像、池子显示「—」？** 头像、池子、K 线都来自国外行情站。程序会自动找代理（先直连，再读系统代理、试常见端口）。如果还是没有：打开你的代理软件，点底栏「🩺 自检」→「能连上行情站」那一项下面有个输入框，填上代理软件里的 HTTP 代理地址（形如 `http://127.0.0.1:端口`，在 Clash / V2Ray 等软件的设置里找「HTTP 代理端口」或「混合端口」），点「保存并测试」，立刻生效，不用重启。

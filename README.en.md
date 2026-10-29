@@ -41,9 +41,11 @@
 - **Single wallet:** only the one Binance Agentic Wallet you sign in with. There are no multi-wallet options in the interface.
 
 ## Quick start (3 minutes)
-**Requirements:** macOS or Linux, Node.js 22 or newer.
+**Requirements:** macOS, Linux or Windows, Node.js 22 or newer.
 
-```bash
+```
+
+**Windows:** install [Node.js 22+](https://nodejs.org), download/clone the project, double-click `install.bat`, then `start.bat` (or run them in PowerShell).bash
 git clone https://github.com/H-eartbreaker/bsc-agent.git
 cd bsc-agent
 ./install.sh      # checks Node, installs dependencies, creates .env, installs the Binance wallet CLI (baw)
@@ -108,6 +110,16 @@ Copy `.env.example` to `.env` and adjust as needed (`install.sh` already does th
 | `BSC_AGENT_UPDATE_REPO` | official repo | Repository the new-version reminder checks |
 | `BSC_AGENT_UPDATE` | on | Set `0` to turn the reminder off |
 | `MYSQL_URL` / `REDIS_URL` | empty | Optional history cache; `scripts/enable-cache.sh` starts both with Docker |
+
+## NFT radar and auto-mint (optional)
+Watches a Telegram new-project channel, lists "free + Agent ID" projects under the **NFT** page, and can **auto-mint** them. Leave it blank if you don't need it.
+
+1. Get an `api_id` / `api_hash` at <https://my.telegram.org> and put them in `.env` as `TG_API_ID` / `TG_API_HASH`, plus the channel to watch as `TG_CHANNEL_ID` (the login script lists channel ids).
+2. Run `node scripts/tg-login.mjs` once to sign in (creates `data/tg-session.txt` locally — **never share or commit it**).
+3. Restart the service, open **NFT** → task manager, set your rules and turn auto-mint on.
+
+Rules: only **free** mints (`value=0`) are executed; paid ones are only shown, never auto-run. Every mint first passes `baw contract-call preview`, and only gas is spent. You can filter by website / X, set exclude keywords, and see success / failure reports and total minted stats. The auto task is **not resumed after a restart** — turn it back on manually.
+> The parser is built for the Aibot channel message format; other formats may not parse.
 
 ## FAQ
 - **Tokens have no avatars and the pool shows "—"?** Avatars, pool size and charts come from overseas data sites. The app finds a proxy automatically (direct first, then the system proxy, then common ports). If there are still no avatars, open your proxy app, then open **🩺 Self-check** in the footer: under "can reach the market data sites" there is an input box. Paste the HTTP proxy address from your proxy app (like `http://127.0.0.1:port`; look for "HTTP proxy port" or "mixed port" in Clash / V2Ray settings) and click **Save & test**. It takes effect immediately, no restart.

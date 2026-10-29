@@ -8,7 +8,7 @@
 <link rel="icon" type="image/png" sizes="96x96" href="logo-96.png?v=gold-b-1" />
 <link rel="apple-touch-icon" href="logo.png?v=gold-b-1" />
 <link rel="stylesheet" href="style.css?v=bsc-agent-copy-34" />
-<link rel="stylesheet" href="agent.css?v=19" />
+<link rel="stylesheet" href="agent.css?v=24" />
 <link rel="stylesheet" href="tracking-panel.css?v=4" />
 <link rel="stylesheet" href="version.css?v=1" />
 </head>
@@ -18,7 +18,8 @@
     <img class="brand-logo" src="logo.png?v=gold-b-1" width="30" height="30" alt="BSC Agent" />
     <div><div class="brand-t">BSC Agent</div><div class="brand-sub">行情终端</div></div>
   </div>
-  <div class="viewsw" id="viewSw"><button data-view="trade" class="active">行情</button><button data-view="pulse">战壕</button><button data-view="track" data-also="snipe">追踪/狙击</button></div>
+  <nav class="viewsw" id="viewSw" aria-label="主导航"><button data-view="trade" class="active">行情</button><button data-view="pulse">战壕</button><button data-view="hold">持仓</button><button data-view="track">追踪</button><button data-view="snipe">狙击</button><button data-view="nft">NFT</button></nav>
+  <div class="task-status-strip" aria-label="自动任务状态"><button data-task-status="snipe" title="打开狙击任务"><i></i><span>狙击</span></button><button data-task-status="track" title="打开跟单任务"><i></i><span>跟单</span></button><button data-task-status="nft" title="打开 NFT 自动 mint 管理"><i></i><span>NFT</span></button></div>
   <label class="search">
     <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2"/></svg>
     <input id="search" placeholder="搜索代币或粘贴合约地址" aria-label="搜索代币或合约地址" autocomplete="off" />
@@ -27,6 +28,7 @@
   </label>
   <div class="header-wallet">
   <div class="authpill hidden" id="authPill"><i></i><span></span></div>
+  <button class="pill nft-float-toggle" id="nftFloatToggle" type="button" title="打开最新 NFT 浮窗" aria-expanded="false">✦ 最新NFT</button>
   <button class="pill fav-tg" id="favToggle" title="收藏栏（显示 / 隐藏）" aria-label="显示或隐藏收藏栏"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z"/></svg></button>
 
   <button class="pill pause-all hidden" id="pauseAll" type="button"></button>
@@ -53,10 +55,6 @@
       <button data-p="four"><span>Four</span> <i class="badge-n" data-n="four"></i></button>
       <button data-p="gang">Gang <i class="badge-n" data-n="gang"></i></button>
     </div>
-      <div class="lctrl">
-        <button class="ibtn" id="btnBell" title="新币通知：页面在后台时，当前平台出新币弹系统通知"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></button>
-        <button class="ibtn" id="btnSound" title="声音：出新币「叮咚」、成交提示音（战壕各列的小喇叭单独控制）"><svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path class="w" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/><path class="x" d="M16 9.5l5 5m0-5l-5 5"/></svg></button>
-      </div>
       </div>
       <div class="market-tools-summary"><span id="marketQuickSummary"></span><button id="marketTrenchFilter" class="market-trench-filter" type="button" data-market-tf title="使用战壕的完整筛选">战壕筛选</button><button id="marketSettingsToggle" type="button" aria-expanded="false" aria-controls="marketSettings">展开设置</button></div>
       <div id="marketSettings" class="hidden">
@@ -112,6 +110,15 @@
 
   <!-- 右：下单 -->
   <aside class="panel right" id="rightPanel">
+    <div id="quickTradeHost"></div>
+    <div id="tradeExtras" class="trade-extras">
+      <details class="trade-fold" id="tradeSettings"><summary>交易设置<span id="tradeSettingSummary">滑点 35%</span></summary><div class="trade-fold-body">
+    <div class="row-lbl"><b>允许价格偏差</b><span class="spacer"></span><span class="muted mono" id="slipShow">35%</span></div>
+    <p class="control-help">成交价格最多允许偏离报价的比例；越高，成交价可能越不利。</p>
+    <div class="seg slip" id="slip"><button data-v="3">3%</button><button data-v="5">5%</button><button data-v="10">10%</button><button data-v="20">20%</button><button data-v="35" class="active">35%</button><button data-v="custom">自定义</button></div>
+    <label class="tgl"><input type="checkbox" id="autoClaim" /><i></i><span>发射后自动领取<small>把已迁移市场的份额领取为代币</small></span></label>
+    <p class="control-help">直接执行、卖出后换回 BNB、记住授权额度默认开启。</p>
+        <details class="trade-quote-detail"><summary>详细下单与报价</summary><div class="trade-fold-body">
     <div class="quote-heading"><h2>交易</h2><span id="quoteMode">只读报价</span></div>
     <div class="seg bs" id="sideTabs"><button data-s="buy" class="active">买入</button><button data-s="sell">卖出</button></div>
     <div class="route" id="route">选择代币后显示报价路线</div>
@@ -122,9 +129,6 @@
     </div>
     <label class="amt"><input id="amount" aria-label="报价金额" class="mono" placeholder="0.00" inputmode="decimal" /><b id="amtUnit">BNB</b></label>
     <div class="presets" id="presets"></div>
-    <div class="row-lbl"><b>允许价格偏差</b><span class="spacer"></span><span class="muted mono" id="slipShow">35%</span></div>
-    <p class="control-help">成交价格最多允许偏离报价的比例；越高，成交价可能越不利。</p>
-    <div class="seg slip" id="slip"><button data-v="3">3%</button><button data-v="5">5%</button><button data-v="10">10%</button><button data-v="20">20%</button><button data-v="35" class="active">35%</button><button data-v="custom">自定义</button></div>
     <div class="quote" id="quote">
       <div><span>预计获得</span><b>—</b></div><div><span>最少获得</span><b>—</b></div><div><span>手续费</span><b>—</b></div>
     </div>
@@ -132,43 +136,69 @@
     <div class="wchips" id="wchips"></div>
     <button class="big-btn" id="submit">预览报价</button>
     <p class="quote-safety" id="quoteSafety">仅预览，不发送交易</p>
-    <section class="advanced-settings"><h3>快捷操作</h3><div class="advanced-body">
     <div class="qtrade"><button id="qBuy2" class="qt-b">⚡ 快捷买入 1% <kbd>空格+W</kbd></button><button id="qClear" class="qt-s">清仓 <kbd>空格+F</kbd></button></div>
-    <label class="tgl"><input type="checkbox" id="fastMode" /><i></i><span>点击后直接执行<small>跳过确认弹窗；只读报价时仍不会上链</small></span></label>
-    <label class="tgl"><input type="checkbox" id="autoClaim" /><i></i><span>发射后自动领取<small>把已迁移市场的份额领取为代币</small></span></label>
-    <label class="tgl" title="卖出 BNCB / GANG / 币股计价的代币后，把这次卖出到账的报价币自动换成 BNB（只换这一笔到账的数量，不动你原有的报价币）"><input type="checkbox" id="sellToBnb" /><i></i>卖出后自动换回 BNB</label>
-    <label class="tgl" title="需要授权时授一个较大的固定额度（报价币约 2 倍单笔上限、卖出的代币约全部余额，不是无限额），以后的交易就不用再单独授权、快约 4 秒。关掉 = 每次只授权本次数量"><input type="checkbox" id="preApproveCap" /><i></i>记住授权额度（减少重复授权）</label>
+        </div></details>
+      </div></details>
+      <details class="trade-fold"><summary>管理<span>授权 · 自动转出 · 屏蔽</span></summary><div class="trade-fold-body">
     <section class="approval-panel"><h3>授权管理</h3><p class="control-help">授权允许指定合约使用你的代币。这里只查询本程序记录过的授权，不代表钱包的全部授权。</p><button class="settings-row" id="openApprovals"><span>读取 / 刷新授权</span><span class="muted">查看额度</span></button><div id="approvalBody" role="status">尚未读取授权记录。</div></section>
     <button class="settings-row" id="autoSendLink" data-autosend><span>自动转出设置</span><span class="muted" id="autoSendSum">—</span></button>
     <button class="settings-row" data-bmgr><span>已屏蔽的代币 / 开发者</span><span class="muted">查看 · 取消屏蔽</span></button>
-    <button class="big-btn" id="submit">买入</button>
-
-    </div></section>
-    <div class="card" id="myPos"></div>
-    <details class="token-details"><summary>代币与合约信息</summary>
-    <div class="card" id="tokenInfo"></div></details>
+      </div></details>
+      <details class="trade-fold"><summary>仓位明细</summary><div class="card" id="myPos"></div></details>
+      <details class="trade-fold token-details"><summary>代币信息<span>合约 · 创建者 · 平台</span></summary><div class="card" id="tokenInfo"></div></details>
+    </div>
   </aside>
 </main>
 <!-- 左侧「钱包追踪」面板（覆盖在页面左边，可拖宽度、可关闭）+ 底部工具栏 -->
 <aside class="panel trk-panel hidden" id="trkPanel"><div class="lh trkp-h"><i class="dot y"></i><b class="lh-t">钱包追踪</b><span class="cnt" id="trkpCount">0</span><div class="lctrl"><input id="trkpMin" class="trkp-min" type="number" step="1" min="0" placeholder="≥ $" title="最小金额（美元）：小于这个金额的成交不显示，和追踪页的「最小金额」是同一个设置"/><button class="apill" id="trkpGo" title="打开追踪页（管理地址、跟单）">管理</button><button class="ibtn" id="trkpClose" title="收起这一栏"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div></div><div class="trkp-list" id="trkpList"></div><i class="trkp-drag" id="trkpDrag" title="拖动调整宽度"></i></aside>
 
 <section class="track snipe hidden" id="snipe"><div class="ts-sw" role="tablist"><button data-tsview="track">追踪</button><button data-tsview="snipe">gang.fun 狙击</button></div><div class="snp"><div id="snpHead"></div><h4 class="trk-h">狙到的币（自动卖出盯着的）</h4><div id="snpPos"></div><div id="snpForm"></div><h4 class="trk-h">狙击记录（每一个新盘的决定、每一次自动卖出：下单 / 跳过及原因）</h4><div class="trk-log" id="snpLog"></div></div></section>
+
+<section class="nft-workspace hidden" id="nft" aria-label="NFT 新项目">
+  <div class="nft-toolbar">
+    <div><h1>NFT 雷达</h1><span class="hsub">新项目监听 · 免费 Agent ID 项目自动 mint · 付费项目手动</span></div>
+    <div class="nft-toolbar-actions"><span id="nftSummary" class="muted"></span><button class="qb" id="nftRefresh">刷新</button></div>
+  </div>
+  <nav class="nft-subnav" aria-label="NFT 工作区"><button class="active" data-nft-mode="projects">项目列表</button><button data-nft-mode="manage">自动 mint 管理</button><button data-nft-mode="history">mint 历史</button></nav>
+  <div class="nft-filterbar" role="toolbar" aria-label="NFT 筛选">
+    <button class="active" data-nft-filter="all">全部</button><button data-nft-filter="eligible" title="符合当前自动 mint 规则">符合规则</button><button data-nft-filter="free">免费</button><button data-nft-filter="paid">付费手动</button><button data-nft-filter="website">有官网</button><button data-nft-filter="x">有 X</button>
+    <span class="spacer"></span><label><input type="checkbox" id="nftRequireSocial"> 官网或 X</label><select id="nftSort"><option value="new">最新</option><option value="minted">已 mint</option><option value="total">总量</option></select>
+  </div>
+  <div class="nft-layout">
+    <div class="nft-project-grid" id="nftProjectGrid"><div class="empty">正在读取 NFT 监听…</div></div>
+    <aside class="nft-detail panel" id="nftDetail"><div class="empty">选择一个项目查看详情</div></aside>
+  </div>
+  <section class="nft-manager hidden" id="nftManager"></section>
+  <section class="nft-history hidden" id="nftHistory"></section>
+</section>
+
+
 <section class="hold hidden" id="hold">
   <!-- 持仓页左侧：Gang 新币战壕（和交易页左栏 Gang 页签同一套卡片和状态框） -->
   <aside class="panel hold-gang" id="holdGang"><div class="lh"><i class="dot g"></i><b class="lh-t">Gang 新币</b><span class="cnt" id="hgCnt">0</span><div class="lctrl"><button class="ibtn" id="hgClose" title="收起（左下角「Gang 新币」再打开）">×</button></div></div><div class="agent-status" id="hgSt"></div><div class="tlist tl-trench" id="hgBody"></div></aside>
   <div class="hold-in">
+  <div class="hold-page-title"><h1>持仓</h1><span>代币与 NFT，集中查看</span></div>
+  <div class="hold-toolbar">
+    <div class="hold-tabs" role="group" aria-label="仓位记录"><button class="active" data-hview="current" aria-pressed="true">当前持仓</button><button data-hview="history" aria-pressed="false">历史仓位</button><button data-hview="calendar" aria-pressed="false">盈亏日历</button></div>
+    <select id="holdWallet" aria-label="筛选持仓钱包"><option value="">全部钱包</option></select><button class="qb" id="holdExchangeOpen">兑换</button>
+    <span class="hold-updated" id="holdUpdated" role="status"></span>
+    <button class="qb" id="holdRefresh">刷新</button>
+  </div>
   <div class="hold-h">
     <div class="hold-tot" id="holdTot"></div>
-    <div class="hold-f">      <button class="qb" id="holdRefresh">刷新</button></div>
   </div>
+  <dialog class="hold-exchange" id="holdExchange" aria-labelledby="exchangeTitle"><div class="portfolio-dialog-head"><h2 id="exchangeTitle">兑换</h2><button class="qb" data-hclose="holdExchange" aria-label="关闭兑换">关闭</button></div>
   <div class="hold-sw" id="holdSwap"></div>
   <div class="hold-q" id="holdQuote"></div>
+  </dialog>
   <div class="hold-b" id="holdBody"></div>
+  <div id="holdCalendar" class="hold-calendar hidden"></div>
+  <section id="holdNfts" class="hold-nfts hidden" aria-label="我的 NFT"></section>
 </div>
   <button class="hg-open hidden" id="hgOpen" title="显示 Gang 新币战壕">Gang 新币 ›</button>
 </section>
 <section class="pulse trench hidden" id="pulse">
-  <div class="pulse-tools"><b>战壕</b><span class="muted">实时新币 / 打满 / 已开盘</span><button type="button" data-pulse-compact class="pulse-compact-toggle">小窗模式</button><span class="pulse-cols"><button data-pulse-col="new" class="on">新创建</button><button data-pulse-col="soon">即将打满</button><button data-pulse-col="dex">已开盘</button></span></div>
+  <div class="pulse-tools"><b>战壕</b><span class="muted">实时新币 / 打满 / 已开盘</span></div>
   <div class="tcol" id="tc-new"><div class="tchw" id="tch-new"></div><div class="tc-pop-w hidden" id="tcf-new"></div><div class="tcb" id="tcb-new"></div></div>
   <div class="tcol" id="tc-soon"><div class="tchw" id="tch-soon"></div><div class="tc-pop-w hidden" id="tcf-soon"></div><div class="tcb" id="tcb-soon"></div></div>
   <div class="tcol" id="tc-dex"><div class="tchw" id="tch-dex"></div><div class="tc-pop-w hidden" id="tcf-dex"></div><div class="tcb" id="tcb-dex"></div></div>
@@ -231,9 +261,11 @@
   </div>
 </div>
 
+<dialog id="profitShare" class="profit-share" aria-labelledby="profitShareTitle"><div class="portfolio-dialog-head"><h2 id="profitShareTitle">分享盈亏</h2><button class="qb" data-hclose="profitShare" aria-label="关闭分享">关闭</button></div><canvas id="profitCanvas" aria-label="BSC Agent 盈亏分享图片"></canvas><div class="profit-share-actions"><label><input id="profitShowAmount" type="checkbox" checked> 显示金额</label><span id="profitShareStatus" role="status"></span><button class="qb" id="profitCopy">复制图片</button><button class="qb" id="profitSave">保存图片</button></div></dialog>
 <div class="toasts" id="toasts"></div>
 <script src="vendor/lightweight-charts.standalone.production.js?v=1792914154.2.0"></script>
-<script type="module" src="app.js?v=bsc-agent-52"></script>
+<script type="module" src="app.js?v=bsc-agent-54"></script>
+<script type="module" src="nft-radar.js?v=5"></script>
 <script type="module" src="version.js?v=4"></script>
 </body>
 </html>

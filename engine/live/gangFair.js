@@ -79,7 +79,7 @@ export async function fairSale(token) {
 
 function bawFor(w, args, timeoutMs) {
   if (!w.cmd) return runBaw(args, { timeoutMs }).then((j) => j.data ?? j);
-  return new Promise((resolve, reject) => execFile(w.cmd[0], [...w.cmd.slice(1), '--json', ...args], { timeout: timeoutMs, maxBuffer: 8 << 20 }, (err, stdout, stderr) => {
+  return new Promise((resolve, reject) => execFile(w.cmd[0], [...w.cmd.slice(1), '--json', ...args], { timeout: timeoutMs, maxBuffer: 8 << 20, shell: process.platform === 'win32' }, (err, stdout, stderr) => {
     let j; try { j = JSON.parse(stdout); } catch { return reject(new Error(String(stderr || stdout || err?.message || '').trim().slice(0, 300) || 'baw 无输出')); }
     if (j.success === false) { const e = j.error || {}; return reject(new Error(`${e.name || e.code || 'baw_error'}: ${e.message || ''}`.trim())); }
     resolve(j.data ?? j);

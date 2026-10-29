@@ -3,7 +3,7 @@
 // 用法：
 //   node scripts/free-mint.mjs 0xAddr1 Name=0xAddr2 ...        # 直接给合约
 //   node scripts/free-mint.mjs --file mints.txt                 # 文件里每行「名字 0x合约」或只写 0x合约
-//   加 --dry 只检查不发交易；--max 10 最多试几枚；--from 0x… 指定钱包（默认取 baw 的 EVM 地址）
+//   加 --dry 只检查不发交易；--max 10 最多试几枚；--from 0x… 指定钱包（默认取 baw 的 EVM 地址）；--json-out 路径 额外把结果写到该文件
 // 规则：只做 value=0 的 mint；preview 有任何异常（扣费/授权/风险/非 NFT 转入）就放弃该项；付费的只报告价格，不执行。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,7 +15,7 @@ const argv = process.argv.slice(2);
 const flag = (n) => argv.includes(n);
 const opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const DRY = flag('--dry');
-const MAX = Number(opt('--max', 10));
+const MAX = Math.max(1, Math.min(50, Number(opt('--max', 10)) || 10));
 const BAW = process.env.BAW_BIN || 'baw';
 const RPC = process.env.RPC_URL || 'https://bsc-dataseed.binance.org';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -25,7 +25,7 @@ const LOGS = path.join(ROOT, 'data', 'mint-logs');
 const targets = [];
 const addTarget = (name, addr) => { if (!targets.some((t) => t.addr.toLowerCase() === addr.toLowerCase())) targets.push({ name: name || addr.slice(0, 8), addr: ethers.getAddress(addr.toLowerCase()) }); };
 for (let i = 0; i < argv.length; i++) {
-  if (['--file', '--max', '--from'].includes(argv[i])) { i++; continue; }
+  if (['--file', '--max', '--from', '--json-out'].includes(argv[i])) { i++; continue; }
   const m = argv[i].match(/^(?:([^=]+)=)?(0x[0-9a-fA-F]{40})$/);
   if (m) addTarget(m[1], m[2]);
 }
@@ -36,7 +36,7 @@ if (file) for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
 }
 if (!targets.length) { console.error('没有合约地址。用法见脚本顶部注释。'); process.exit(1); }
 
-const sh = (args) => new Promise((resolve) => execFile(BAW, args, { env: process.env, maxBuffer: 1e7 }, (e, so, se) => {
+const sh = (args) => new Promise((resolve) => execFile(BAW, args, { env: process.env, maxBuffer: 1e7, shell: process.platform === 'win32' }, (e, so, se) => {   // Windows 上 baw 是 .cmd，必须经过 shell
   const raw = so || se || String(e); try { resolve(JSON.parse(raw)); } catch { resolve({ success: false, raw: raw.slice(0, 400) }); }
 }));
 const clock = (t = Date.now()) => new Date(t).toLocaleTimeString('zh-CN', { hour12: false });
@@ -195,5 +195,7 @@ const bnb1 = await rpc((n) => n.getBalance(ME));
 console.log(`\n总耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s  gas 花费 ${ethers.formatEther(bnb0 - bnb1)} BNB  余额 ${ethers.formatEther(bnb1)} BNB`);
 fs.mkdirSync(LOGS, { recursive: true });
 const logf = path.join(LOGS, new Date().toISOString().replace(/[:.]/g, '-') + '.json');
-fs.writeFileSync(logf, JSON.stringify({ wallet: ME, dry: DRY, results }, null, 1));
+const payload = JSON.stringify({ wallet: ME, dry: DRY, source: process.env.FREE_MINT_SOURCE || 'manual', results }, null, 1);
+fs.writeFileSync(logf, payload);
+if (opt('--json-out')) fs.writeFileSync(opt('--json-out'), payload);
 console.log('记录已存：' + path.relative(ROOT, logf));

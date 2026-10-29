@@ -4,6 +4,20 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.3.7
+**New: NFT radar and auto-mint**
+- New **NFT** tab: watches a Telegram new-project channel (set `TG_*` in `.env`, sign in once with `node scripts/tg-login.mjs`). Project grid, rule matches, mint history and task manager live here; a "Latest NFT" float on the side can dock left / right and is visible site-wide.
+- Auto-mint runs on the server: only free (`value=0`) projects with an Agent ID, optional website / X filters and exclude keywords, every mint passes `baw contract-call preview` first, and paid ones are never auto-executed. Failures retry after 2m / 10m / 30m / 2h (within 12h) and a broadcast transaction is never re-sent. The page shows success / failure reports and totals; the task is not resumed after a restart.
+- Task lights at the top: sniper / copy-trade / NFT show green when on, grey when off.
+
+**Interface**
+- All sub-navigation now uses the same underline tabs, and the desktop layout stays fixed when the window shrinks.
+
+**Windows**
+- Added `install.bat` / `start.bat` for out-of-the-box Windows use; calls to the Binance wallet CLI (`baw.cmd`) are handled.
+
+Restart the service and refresh the page after upgrading; if you ran the watcher by hand before, stop it first.
+
 ## 0.3.6
 **Interface**
 - The token detail header is now a single row: logo / name / address, price and 1h change, market cap / liquidity / volume / holders, name / migration progress / fees / age, plus the star, BscScan, GMGN and quick-quote links on the right. It only wraps when the screen is too narrow.

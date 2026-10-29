@@ -5,6 +5,7 @@ import * as baw from './baw.js';
 import { QUOTE_TOKENS } from './config.js';
 import { ethers } from 'ethers';
 import { cache } from './cache.js';
+import { realizedTrades } from './realized.js';
 
 const HIST_MS = 60_000;
 const lc = (a) => String(a || '').toLowerCase();
@@ -96,12 +97,12 @@ export class Holdings {
               const o = other(out); let v = o.bnb;
               if (!v && qs.has(tok) && Object.keys(out).length) v = got * this.rateAt(tok, ts);   // 卖别的币换回报价币：按当时汇率记成本；单纯转入不算成本
               r.buys++; r.boughtBnb += v; r.boughtUsd += v * px; r.boughtQty += got; if (o.qAmt) { r.boughtQuote += o.qAmt; r.quote = o.qAddr; }
-              r.trades.push({ side: 'buy', ts, tokens: got, bnb: v, usd: v * px, quoteAmt: o.qAmt || null, quote: o.qAddr, tx: h.txHash });
+              r.trades.push({ side: 'buy', kind: v > 0 ? 'trade' : 'transfer', feeUsd: fee * px, ts, tokens: got, bnb: v, usd: v * px, quoteAmt: o.qAmt || null, quote: o.qAddr, tx: h.txHash });
             } else if (sent > 0) {
               const o = other(inn); let v = o.bnb;
               if (!v && qs.has(tok)) v = sent * this.rateAt(tok, ts);   // 报价币拿去买了别的币：按当时汇率记作转出价值
               r.sells++; r.soldQty += sent; r.soldBnb += v; r.soldUsd += v * px;
-              r.trades.push({ side: 'sell', ts, tokens: sent, bnb: v, usd: v * px, quoteAmt: o.qAmt || null, quote: o.qAddr, tx: h.txHash });
+              r.trades.push({ side: 'sell', kind: Object.keys(inn).length && v > 0 ? 'trade' : 'transfer', feeUsd: fee * px, ts, tokens: sent, bnb: v, usd: v * px, quoteAmt: o.qAmt || null, quote: o.qAddr, tx: h.txHash });
             } else continue;
             r.fees += fee; r.feesUsd += fee * px; r.firstAt = Math.min(r.firstAt, ts); r.lastAt = Math.max(r.lastAt, ts); m.set(tok, r);
           }
@@ -173,7 +174,7 @@ export class Holdings {
     const open = rows.filter((r) => r.amount > 0);
     const tot = (k, list = rows) => list.reduce((a, r) => a + (r[k] || 0), 0);   // 不显示的（null）按 0 计
     return {
-      rows, bnb: w?.bnb || 0, bnbUsd, historyAt: this.histAt, syncedAt: this.trader.syncAt || 0, updatedAt: Date.now(),
+      rows, realized: realizedTrades(this.hist, this.quoteSet()), historyScope: '最近可读取的钱包交易（最多 500 笔）；不含计价币兑换与仅有本地记录的曲线份额。成本按移动平均法，美元使用成交时小时价格，缺价时估算。', bnb: w?.bnb || 0, bnbUsd, historyAt: this.histAt, syncedAt: this.trader.syncAt || 0, updatedAt: Date.now(),
       totals: { valueBnb: tot('valueBnb', open), costBnb: tot('costBnb'), soldBnb: tot('soldBnb'), pnlBnb: tot('pnlBnb'), open: open.length,
         valueUsd: tot('valueUsd', open), costUsd: tot('costUsd'), soldUsd: tot('soldUsd'), pnlUsd: tot('pnlUsd') },
     };
