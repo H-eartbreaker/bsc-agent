@@ -5,8 +5,9 @@ const PROXY_HOSTS = /(^|\.)(dexscreener\.com|geckoterminal\.com|four\.meme|pinat
 const agents = new Map();
 export const proxyUrl = () => process.env.BSC_AGENT_PROXY || '';
 export const needsProxy = (url) => { try { return !!proxyUrl() && PROXY_HOSTS.test(new URL(url).hostname); } catch { return false; } };
-export function proxyAgentFor(url) {
-  if (!needsProxy(url)) return undefined;
+// force：NFT 元数据 / 图片托管在各种项目自己的域名上，名单里没有，设了代理就强制走代理
+export function proxyAgentFor(url, force = false) {
+  if (!(force ? !!proxyUrl() : needsProxy(url))) return undefined;
   const p = proxyUrl(); let a = agents.get(p);
   if (!a) { a = new https.Agent({ keepAlive: true, proxyEnv: { HTTPS_PROXY: p, https_proxy: p } }); agents.set(p, a); }
   return a;

@@ -4,6 +4,10 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.4.2
+**NFT**
+- Fixed missing NFT avatars: project-hosted metadata / image domains are often unreachable directly, so when a proxy is set they are now fetched through it first, then directly.
+
 ## 0.4.1
 **NFT**
 - "My NFTs" has a new switch, "Hide projects with no listings and no volume" (on by default, remembered): projects with no listings and zero 24h volume no longer fill the list, and the number hidden is shown next to it. Projects with an alert, or whose price could not be read, are never hidden.

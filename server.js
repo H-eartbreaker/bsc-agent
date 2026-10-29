@@ -19,7 +19,7 @@ import { Favorites } from './engine/favorites.js';
 import { MODE, LIVE_TRADE } from './engine/live/config.js';
 import { isLocalRequest, localBoundary, rejectUnsafeBody, isPublicImageUrl, safeLookup, assertPublicHost } from './engine/security.js';
 import { loadApiToken, hasApiAccess, apiAuth, tokenMatches } from './engine/apiAuth.js';
-import { proxyAgentFor, pfetch, autoProxy, proxyState, trySetProxy } from './engine/netProxy.js';
+import { proxyAgentFor, proxyUrl as artProxyUrl, pfetch, autoProxy, proxyState, trySetProxy } from './engine/netProxy.js';
 import { WalletFleet, parsePeers } from './engine/live/walletFleet.js';
 import { BAW_DIR, WALLET_LABEL, DATA_DIR as DATA_DIR_UI } from './engine/live/config.js';
 import * as latency from './engine/live/latency.js';
@@ -556,20 +556,20 @@ const IPFS_GW = ['https://flap.mypinata.cloud/ipfs/', 'https://ipfs.io/ipfs/', '
 const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg', 'image/avif': 'avif' };
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const VIA_PROXY = !!(process.env.BSC_AGENT_PROXY || process.env.HTTPS_PROXY || process.env.https_proxy || process.env.ALL_PROXY || process.env.all_proxy);
-async function httpsGet(u, signal) {
+async function httpsGet(u, signal, force = false) {
   await assertPublicHost(new URL(u).hostname, VIA_PROXY);
   return new Promise((resolve, reject) => {
-    const req = https.get(u, { lookup: safeLookup, agent: proxyAgentFor(u), signal, headers: { accept: 'image/*,*/*;q=0.5', 'user-agent': UA } }, resolve);
+    const req = https.get(u, { lookup: safeLookup, agent: proxyAgentFor(u, force), signal, headers: { accept: 'image/*,*/*;q=0.5', 'user-agent': UA } }, resolve);
     req.on('error', reject);
   });
 }
-async function imgFetchOne(u) {
+async function imgFetchOnce(u, force) {
   const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 8000);
   try {
     let r;
     for (let redirects = 0; redirects <= 3; redirects++) {
       if (!isPublicImageUrl(u)) throw new Error('image url is not allowed');
-      r = await httpsGet(u, ac.signal);
+      r = await httpsGet(u, ac.signal, force);
       if (![301, 302, 303, 307, 308].includes(r.statusCode)) break;
       r.destroy();
       if (redirects === 3 || !r.headers.location) throw new Error('image redirect limit');
@@ -588,6 +588,10 @@ async function imgFetchOne(u) {
     const buf = Buffer.concat(chunks); if (!buf.length) throw new Error('size');
     return { ct, buf };
   } finally { clearTimeout(tm); }
+}
+async function imgFetchOne(u) {
+  if (artProxyUrl()) { try { return await imgFetchOnce(u, true); } catch { /* 回退直连 */ } }
+  return imgFetchOnce(u, false);
 }
 async function imgFetch(u) {
   const m = u.match(/\/ipfs\/(.+)$/); const urls = [u, ...(m ? IPFS_GW.map((g) => g + m[1]).filter((x) => x !== u) : [])];
@@ -631,13 +635,13 @@ setInterval(() => {
   for (const t of todo) { prewarmTries.set(t.image, (prewarmTries.get(t.image) || 0) + 1); ensureImg(t.image).catch(() => {}); }
 }, 3000);
 // NFT 头像：Telegram 消息里没有图，按合约读 contractURI/tokenURI 里的 image，再走上面的图片缓存。
-async function jsonFetch(u) {
-  const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 8000);
+async function jsonFetchOnce(u, force) {
+  const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 10_000);
   try {
     let r;
     for (let i = 0; i <= 3; i++) {
       if (!isPublicImageUrl(u)) throw new Error('url not allowed');
-      r = await httpsGet(u, ac.signal);
+      r = await httpsGet(u, ac.signal, force);
       if (![301, 302, 303, 307, 308].includes(r.statusCode)) break;
       r.destroy(); if (i === 3 || !r.headers.location) throw new Error('redirect'); u = new URL(r.headers.location, u).href;
     }
@@ -646,6 +650,11 @@ async function jsonFetch(u) {
     for await (const ch of r) { size += ch.length; if (size > 5e5) { r.destroy(); throw new Error('too big'); } chunks.push(ch); }
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } finally { clearTimeout(tm); }
+}
+// 设了代理就先走代理（项目自己的域名常被墙），不通再直连
+async function jsonFetch(u) {
+  if (artProxyUrl()) { try { return await jsonFetchOnce(u, true); } catch { /* 回退直连 */ } }
+  return jsonFetchOnce(u, false);
 }
 const nftArt = new ArtResolver({ provider: market.provider, fetchJson: jsonFetch, file: path.join(__dirname, 'data', 'nft-art.json') });
 app.get('/api/nft/art/:contract', async (req, res) => {
