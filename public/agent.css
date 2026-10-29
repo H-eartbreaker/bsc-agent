@@ -1532,7 +1532,7 @@ html.narrow .nft-manager-grid { grid-template-columns: minmax(0, 1fr); }
 html.narrow .nft-setting-row { flex-wrap: wrap; }
 html.narrow .nft-history-table { overflow-x: auto; }
 html.narrow .nft-history-row { min-width: 720px; }
-html.narrow .nft-float-panel { width: 100vw; border-radius: 0; }
+html.narrow .nft-float-panel { width: 100vw; max-width: 100vw; border-radius: 0; }
 html.narrow .hold-exchange, html.narrow .profit-share { width: calc(100vw - 24px); }
 
 .nft-badge.done { color: #06110e; background: var(--g); border-color: var(--g); font-weight: 700; }
@@ -1552,3 +1552,20 @@ html.nft-docked-left:not(.narrow) .topbar, html.nft-docked-left:not(.narrow) .st
 .nft-manual-qty { width: 72px; height: 34px; padding: 0 8px; border: 1px solid var(--line2); border-radius: 8px; background: var(--bg); color: inherit; font: inherit; }
 .nft-manual-msg.bad { color: var(--r, #e5484d); }
 .nft-manual-mint button[disabled] { opacity: .5; cursor: wait; }
+
+/* 浮窗：底栏永远压在浮窗上面（不会被挡）；头部控件放不下就换行；可最小化成一个小条 */
+.nft-float-panel { max-width: 100vw; box-sizing: border-box; padding-top: 34px; }
+html:not(.narrow) .statusbar { position: relative; z-index: 130; }
+html.narrow .statusbar { z-index: 130; }
+html.narrow .nft-float-panel.min { width: auto; max-width: none; border-radius: 16px; }
+.nft-new-head { flex-wrap: wrap; }
+.nft-new-head-actions { flex-wrap: wrap; }
+.nft-float-bar { position: absolute; top: 6px; right: 8px; display: flex; gap: 4px; z-index: 2; }
+.nft-float-bar button { width: 24px; height: 22px; padding: 0; border: 1px solid var(--line2); border-radius: 6px; background: var(--panel2); color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; }
+.nft-float-bar button:hover { color: var(--g); border-color: var(--g); }
+.nft-float-panel.left .nft-float-bar { right: auto; left: 8px; }
+.nft-float-chip { display: none; }
+.nft-float-panel.min { top: auto; bottom: calc(var(--footerH, 28px) + 8px); right: 12px; width: auto; height: auto; padding: 0; overflow: visible; border: 1px solid var(--g); border-radius: 16px; background: var(--panel); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.nft-float-panel.min.left { right: auto; left: 12px; }
+.nft-float-panel.min > :not(.nft-float-chip) { display: none; }
+.nft-float-panel.min .nft-float-chip { display: block; height: 30px; padding: 0 14px; border: 0; border-radius: 16px; background: var(--g-bg); color: var(--g); font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }

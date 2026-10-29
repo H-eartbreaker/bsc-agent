@@ -2,7 +2,7 @@ const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const R = { rows: [], history: [], filter: 'all', sort: 'new', social: false, selected: null, timer: 0, active: false, floatOpen: false, floatSide: localStorage.getItem('bscagent.nftFloatSide') || 'right', mode: 'projects', historyScope: 'session', auto: null, summary: null, msg: '' };
+const R = { rows: [], history: [], filter: 'all', sort: 'new', social: false, selected: null, timer: 0, active: false, floatOpen: false, floatSide: localStorage.getItem('bscagent.nftFloatSide') || 'right', floatMin: localStorage.getItem('bscagent.nftFloatMin') === '1', mode: 'projects', historyScope: 'session', auto: null, summary: null, msg: '' };
 const viewButtons = () => $$('#viewSw button');
 const isNftRoute = () => /^#\/?nft(?:$|\/)/.test(location.hash);
 
@@ -22,10 +22,17 @@ function ensureFloatPanel() {
   return panel;
 }
 
+function setFloatMin(min) {
+  R.floatMin = !!min; try { localStorage.setItem('bscagent.nftFloatMin', R.floatMin ? '1' : '0'); } catch { /* 存不了就只在本次有效 */ }
+  ensureFloatPanel().classList.toggle('min', R.floatMin); syncDock();
+}
+
 function toggleFloat(force) {
+  if (typeof force !== 'boolean' && R.floatOpen && R.floatMin) { setFloatMin(false); return; }   // 已最小化时点底栏按钮 = 还原
   R.floatOpen = typeof force === 'boolean' ? force : !R.floatOpen;
   const panel = ensureFloatPanel();
   panel.classList.toggle('hidden', !R.floatOpen);
+  panel.classList.toggle('min', R.floatMin);
   const button = $('#nftFloatToggle');
   button?.classList.toggle('active', R.floatOpen);
   button?.setAttribute('aria-expanded', String(R.floatOpen));
@@ -36,8 +43,9 @@ function toggleFloat(force) {
 
 function syncDock() {
   const h = document.documentElement.classList;
-  h.toggle('nft-docked-right', R.floatOpen && R.floatSide !== 'left');
-  h.toggle('nft-docked-left', R.floatOpen && R.floatSide === 'left');
+  const docked = R.floatOpen && !R.floatMin;   // 最小化后不再占页面位置
+  h.toggle('nft-docked-right', docked && R.floatSide !== 'left');
+  h.toggle('nft-docked-left', docked && R.floatSide === 'left');
 }
 
 function setFloatSide(side) {
@@ -246,7 +254,7 @@ function render() {
   if (selected) { $('#nftDetail').innerHTML = detail(selected); const c = grid.querySelector(`[data-nft-select="${selected.contract}"]`); c?.classList.add('selected'); }
   else if (rows.length) $('#nftDetail').innerHTML = newProjectPanel(rows);
   else $('#nftDetail').innerHTML = '<div class="empty">监听列表为空，先启动 Telegram 监听。</div>';
-  const float = ensureFloatPanel(); setFloatSide(R.floatSide); if (R.floatOpen) float.innerHTML = selected ? detail(selected) : newProjectPanel(rows);
+  const float = ensureFloatPanel(); setFloatSide(R.floatSide); if (R.floatOpen) float.innerHTML = `<button class="nft-float-chip" data-nft-min="0" title="还原">✦ 最新NFT · ${rows.length}</button><div class="nft-float-bar"><button data-nft-min="1" title="最小化" aria-label="最小化">—</button><button data-nft-close title="关闭" aria-label="关闭">×</button></div>` + (selected ? detail(selected) : newProjectPanel(rows));
 }
 
 // 图片加载失败就拿掉 <img>，露出底下的字母（页面 CSP 不允许行内 onerror，所以用捕获监听）
@@ -255,6 +263,8 @@ document.addEventListener('click', async (e) => {
   const status = e.target.closest('[data-task-status]');
   if (status) { e.preventDefault(); const target = document.querySelector(`#viewSw button[data-view="${status.dataset.taskStatus}"]`); target?.click(); if (status.dataset.taskStatus === 'nft') { R.mode = 'manage'; $$('[data-nft-mode]').forEach((b) => b.classList.toggle('active', b.dataset.nftMode === R.mode)); load(); } return; }
   if (e.target.closest('#nftFloatToggle')) { e.preventDefault(); toggleFloat(); return; }
+  const mn = e.target.closest('[data-nft-min]'); if (mn) { setFloatMin(mn.dataset.nftMin === '1'); return; }
+  if (e.target.closest('[data-nft-close]')) { toggleFloat(false); return; }
   const side = e.target.closest('[data-nft-side]'); if (side) { setFloatSide(side.dataset.nftSide); render(); return; }
   const nav = e.target.closest('#viewSw button[data-view="nft"]');
   if (nav) { e.preventDefault(); e.stopImmediatePropagation(); history.replaceState(null, '', '#/nft'); setVisible(true); return; }
