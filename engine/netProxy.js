@@ -1,7 +1,7 @@
 // 只给被墙的行情站 / 图片站走代理（Clash、V2Ray 等）。.env 里设了 BSC_AGENT_PROXY 就用它；没设就自动找：先试直连，不通再读系统代理、试常见端口。
 // 下单、RPC、WSS 都不经过这里，不会被代理拖慢。代理连不上时自动回退直连。
 import https from 'node:https';
-const PROXY_HOSTS = /(^|\.)(dexscreener\.com|geckoterminal\.com|four\.meme|pinata\.cloud|ipfs\.io|dweb\.link|w3s\.link|nftstorage\.link|gang\.fun|flap\.sh|githubusercontent\.com)$/i;
+const PROXY_HOSTS = /(^|\.)(dexscreener\.com|geckoterminal\.com|four\.meme|pinata\.cloud|ipfs\.io|dweb\.link|w3s\.link|nftstorage\.link|gang\.fun|flap\.sh|githubusercontent\.com|okx\.com)$/i;
 const agents = new Map();
 export const proxyUrl = () => process.env.BSC_AGENT_PROXY || '';
 export const needsProxy = (url) => { try { return !!proxyUrl() && PROXY_HOSTS.test(new URL(url).hostname); } catch { return false; } };

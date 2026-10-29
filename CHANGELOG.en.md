@@ -4,6 +4,13 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.4.0
+**NFT**
+- New "My NFTs" tab: lists every project you minted with holdings, floor price, 24h volume (with trade count), total volume and owner count, plus a link to the OKX page. Prices are read from OKX NFT marketplace's public pages: **no API key needed, read-only, never touches your wallet**.
+- Price / volume alerts: when a floor price reaches your threshold, or 24h volume reaches yours (default 1 BNB, 0 turns the volume alert off), the NFT nav button shows a red dot, a pop-up appears and an alert bar shows at the top of the page. A project that already alerted must rise another 50% before it alerts again.
+- The check interval is adjustable (5 minutes to 24 hours, default 15 minutes) and takes effect immediately without a restart.
+- Projects with no listings show "No listings"; ones OKX does not index show "No market"; if an OKX page occasionally comes back without data, the check retries automatically.
+
 ## 0.3.9
 **NFT**
 - Added manual mint: any project can be minted manually with a quantity you choose. Paid projects are quoted first and send a transaction only after a second confirmation (per-transaction cap 0.5 BNB by default, adjustable with `NFT_MANUAL_MAX_BNB`). Auto-mint still only handles free projects.

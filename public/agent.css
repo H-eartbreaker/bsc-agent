@@ -1569,3 +1569,35 @@ html.narrow .nft-float-panel.min { width: auto; max-width: none; border-radius: 
 .nft-float-panel.min.left { right: auto; left: 12px; }
 .nft-float-panel.min > :not(.nft-float-chip) { display: none; }
 .nft-float-panel.min .nft-float-chip { display: block; height: 30px; padding: 0 14px; border: 0; border-radius: 16px; background: var(--g-bg); color: var(--g); font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+
+/* 我的 NFT */
+.nft-mine { width: min(100%, var(--page-max, 1440px)); margin: 18px auto 0; }
+.nft-mine-table { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.nft-mine-row { display: grid; grid-template-columns: minmax(200px, 1.5fr) 60px 120px 120px 120px 90px minmax(150px, 1fr); gap: 10px; align-items: center; min-height: 48px; padding: 7px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.nft-mine-row:last-child { border-bottom: 0; }
+.nft-mine-row b, .nft-mine-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nft-mine-row b { color: var(--text); }
+.nft-mine-row small { margin-top: 3px; color: var(--dim); }
+.nft-mine-head { min-height: 36px; background: var(--panel2); color: var(--text); font-size: 11px; }
+.nft-mine-row.hot { background: var(--g-bg); }
+.nft-mine-hot { color: var(--g); font-weight: 600; margin-right: 6px; }
+.nft-mine-row a { color: var(--g); margin-left: 6px; }
+#viewSw button.has-alert { position: relative; }
+#viewSw button.has-alert::after { content: ''; position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--r); }
+.nft-alert-toast { position: fixed; right: 18px; bottom: 18px; z-index: 9999; max-width: 320px; padding: 12px 16px; border: 1px solid rgba(34,185,158,.55); border-radius: 10px; background: var(--panel); color: var(--g); font-size: 13px; cursor: pointer; box-shadow: 0 6px 24px rgba(0,0,0,.35); }
+
+
+.nft-mine-settings { max-width: 560px; margin-top: 14px; }
+.nft-mine-settings .nft-setting-row { min-height: 52px; }
+.nft-mine-settings .nft-setting-row > span:first-child small { display: block; margin-top: 3px; color: var(--dim); font-size: 11px; }
+.nft-unit { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.nft-mine-settings .nft-unit input { width: 96px; text-align: right; }
+.nft-mine-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.nft-mine-btns .nft-action { min-width: 96px; padding: 0 14px; }
+.nft-mine-note { margin-top: 12px; padding: 9px 12px; border: 1px solid var(--y); border-radius: 8px; background: var(--y-bg); color: var(--y); font-size: 12px; }
+.nft-mine-strip { display: flex; gap: 12px; align-items: center; margin-top: 14px; padding: 12px 16px; border: 1px solid var(--g); border-left-width: 4px; border-radius: 8px; background: var(--g-bg); color: var(--text); font-size: 13px; }
+.nft-mine-strip b { color: var(--g); white-space: nowrap; }
+.nft-mine-strip span { flex: 1; }
+.nft-mine-strip button { min-height: 28px; padding: 0 14px; border: 1px solid var(--g); border-radius: 6px; color: var(--g); font-size: 12px; }
+.nft-mine-table { margin-top: 14px; }
+.nft-mine-row button { min-height: 26px; padding: 0 10px; border: 1px solid var(--g); border-radius: 6px; color: var(--g); font-size: 11px; }

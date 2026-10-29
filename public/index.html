@@ -8,7 +8,7 @@
 <link rel="icon" type="image/png" sizes="96x96" href="logo-96.png?v=gold-b-1" />
 <link rel="apple-touch-icon" href="logo.png?v=gold-b-1" />
 <link rel="stylesheet" href="style.css?v=bsc-agent-copy-34" />
-<link rel="stylesheet" href="agent.css?v=32" />
+<link rel="stylesheet" href="agent.css?v=36" />
 <link rel="stylesheet" href="tracking-panel.css?v=4" />
 <link rel="stylesheet" href="version.css?v=1" />
 </head>
@@ -159,7 +159,7 @@
     <div><h1>NFT 雷达</h1><span class="hsub">新项目监听 · 免费 Agent ID 项目自动 mint · 付费项目手动</span></div>
     <div class="nft-toolbar-actions"><span id="nftSummary" class="muted"></span><button class="qb" id="nftRefresh">刷新</button></div>
   </div>
-  <nav class="nft-subnav" aria-label="NFT 工作区"><button class="active" data-nft-mode="projects">项目列表</button><button data-nft-mode="manage">自动 mint 管理</button><button data-nft-mode="history">mint 历史</button></nav>
+  <nav class="nft-subnav" aria-label="NFT 工作区"><button class="active" data-nft-mode="projects">项目列表</button><button data-nft-mode="manage">自动 mint 管理</button><button data-nft-mode="history">mint 历史</button><button data-nft-mode="mine">我的 NFT</button></nav>
   <div class="nft-filterbar" role="toolbar" aria-label="NFT 筛选">
     <button class="active" data-nft-filter="all">全部</button><button data-nft-filter="eligible" title="符合当前自动 mint 规则">符合规则</button><button data-nft-filter="free">免费</button><button data-nft-filter="paid">付费手动</button><button data-nft-filter="website">有官网</button><button data-nft-filter="x">有 X</button>
     <span class="spacer"></span><label><input type="checkbox" id="nftRequireSocial"> 官网或 X</label><select id="nftSort"><option value="new">最新</option><option value="minted">已 mint</option><option value="total">总量</option></select>
@@ -170,6 +170,7 @@
   </div>
   <section class="nft-manager hidden" id="nftManager"></section>
   <section class="nft-history hidden" id="nftHistory"></section>
+  <section class="nft-mine hidden" id="nftMine"></section>
 </section>
 
 
@@ -267,7 +268,7 @@
 <script src="vendor/lightweight-charts.standalone.production.js?v=1792914154.2.0"></script>
 <script src="fit.js?v=3"></script>
 <script type="module" src="app.js?v=bsc-agent-56"></script>
-<script type="module" src="nft-radar.js?v=13"></script>
+<script type="module" src="nft-radar.js?v=19"></script>
 <script type="module" src="version.js?v=4"></script>
 </body>
 </html>

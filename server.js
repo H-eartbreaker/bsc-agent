@@ -36,6 +36,7 @@ import { AutoMint, scriptRunner } from './engine/nft/autoMint.js';
 import { WatchSupervisor } from './engine/nft/watchSupervisor.js';
 import { FeedSync, DEFAULT_FEED_URL } from './engine/nft/feedSync.js';
 import { FeedPublisher } from './engine/nft/feedPublish.js';
+import { MarketWatch } from './engine/nft/marketWatch.js';
 
 // 日志脱敏：控制台 / live.log 里出现的 RPC 地址（含 NodeReal key）一律打码
 for (const k of ['log', 'info', 'warn', 'error']) { const f = console[k].bind(console); console[k] = (...a) => f(...a.map((x) => (typeof x === 'string' ? redactSecrets(x) : x instanceof Error ? redactSecrets(x.stack || x.message) : x))); }
@@ -336,6 +337,25 @@ app.get('/api/nft-holdings', async (req, res) => {
   const wallet = trader.wallets?.[0]?.address;
   const result = await nftPortfolio.read(wallet);
   res.json({ ...result, wallet: wallet || null, walletLabel: WALLET_LABEL });
+});
+const nftMarket = new MarketWatch({ file: path.join(__dirname, 'data', 'nft-market.json'), chain: process.env.NFT_MARKET_CHAIN || 'bsc', log: (m) => console.log(m) });
+const nftMine = async () => { const w = trader.wallets?.[0]?.address; return { wallet: w || null, ...(w ? await nftPortfolio.read(w) : { rows: [] }) }; };
+app.get('/api/nft/market', async (req, res) => {
+  if (!LIVE) return res.json({ rows: [], alerts: [] });
+  const mine = await nftMine();
+  const rows = (mine.rows || []).map((r) => ({ contract: r.contract, name: r.name, count: r.count, tokenIds: r.tokenIds, ...nftMarket.priceOf(r.contract) }));
+  res.json({ ...nftMarket.view(), rows, partial: !!mine.unavailable, alerts: nftMarket.pendingAlerts() });
+});
+app.get('/api/nft/market/alerts', (req, res) => res.json({ ...nftMarket.view(), alerts: nftMarket.pendingAlerts() }));
+app.post('/api/nft/market/config', (req, res) => {
+  try { if (req.body?.minFloor !== undefined) nftMarket.setMinFloor(req.body.minFloor); if (req.body?.minVolume24h !== undefined) nftMarket.setMinVolume24h(req.body.minVolume24h); if (req.body?.intervalMin !== undefined) nftMarket.setIntervalMin(req.body.intervalMin); nftMarket.reevaluate(); res.json({ ...nftMarket.view(), alerts: nftMarket.pendingAlerts() }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/nft/market/ack', (req, res) => { nftMarket.ack(req.body?.contract); res.json({ alerts: nftMarket.pendingAlerts() }); });
+app.post('/api/nft/market/refresh', async (req, res) => {
+  const mine = await nftMine();
+  nftMarket.refresh((mine.rows || []).map((r) => r.contract)).catch(() => {});
+  res.json({ started: true });
 });
 // ---------- 兼容层：把他的多钱包写法接到你的 WalletFleet 上 ----------
 const loginView = (l) => (l ? { id: l.id, state: l.state, urlForWeb: l.urlForWeb, pairingCode: l.pairingCode, expireAt: l.expireAt, message: l.message, address: l.address || null } : null);
@@ -829,5 +849,6 @@ server.listen(PORT, process.env.HOST || '127.0.0.1', () => {
   if (LIVE) console.log(`  baw：${trader.status.connected ? `已连接 ${trader.wallets[0].address}` : `未连接（${trader.status.error}）`}`);
   console.log(`  ➜  http://localhost:${PORT}\n`);
   nftAuto.start(); nftWatcher.start();
+  nftMarket.start(async () => ((await nftMine()).rows || []).map((r) => r.contract));
   if (nftWatcher.configured()) nftPublisher.start(); else if (process.env.NFT_FEED_SYNC !== '0') nftSync.start();
 });

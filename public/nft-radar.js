@@ -248,6 +248,8 @@ function render() {
   grid.innerHTML = rows.length ? rows.map(card).join('') : '<div class="empty">没有符合筛选条件的项目</div>';
   managerEl?.classList.toggle('hidden', R.mode !== 'manage'); if (managerEl && R.mode === 'manage') managerEl.innerHTML = manager();
   historyEl?.classList.toggle('hidden', R.mode !== 'history'); if (historyEl && R.mode === 'history') historyEl.innerHTML = historyMarkup();
+  const mineEl = $('#nftMine'); mineEl?.classList.toggle('hidden', R.mode !== 'mine');
+  if (mineEl && R.mode === 'mine') { if (!R.mineDirty && (!mineEl.contains(document.activeElement) || document.activeElement.tagName === 'BUTTON')) mineEl.innerHTML = mineMarkup(); if (!R.mineAt || Date.now() - R.mineAt > 15000) loadMine(); }
   layout?.classList.toggle('hidden', R.mode !== 'projects');
   document.querySelector('#nft .nft-filterbar')?.classList.toggle('hidden', R.mode !== 'projects');
   const selected = R.rows.find((p) => p.contract === R.selected);
@@ -255,6 +257,60 @@ function render() {
   else if (rows.length) $('#nftDetail').innerHTML = newProjectPanel(rows);
   else $('#nftDetail').innerHTML = '<div class="empty">监听列表为空，先启动 Telegram 监听。</div>';
   const float = ensureFloatPanel(); setFloatSide(R.floatSide); if (R.floatOpen) float.innerHTML = `<button class="nft-float-chip" data-nft-min="0" title="还原">✦ 最新NFT · ${rows.length}</button><div class="nft-float-bar"><button data-nft-min="1" title="最小化" aria-label="最小化">—</button><button data-nft-close title="关闭" aria-label="关闭">×</button></div>` + (selected ? detail(selected) : newProjectPanel(rows));
+}
+
+// ---- 我的 NFT：持仓 + 市场地板价 + 涨价提醒（只读，不碰钱包）----
+async function loadMine() {
+  R.mineAt = Date.now();
+  try { const r = await fetch('/api/nft/market', { headers: HDR }); if (r.ok) { R.mine = await r.json(); render(); } } catch { /* 下次再试 */ }
+}
+const fmtFloor = (m) => m.status === 'none' ? '暂无市场' : m.floor == null ? (m.status === 'ok' ? '无挂单' : '—') : `${+m.floor.toFixed(4)} ${esc(m.symbol || '')}`;
+const alertText = (a) => [a.reason !== 'volume' ? `地板价 ${+a.floor.toFixed(4)} ${a.symbol}` : '', a.reason !== 'floor' && a.volume24h != null ? `24h 成交量 ${+a.volume24h.toFixed(3)} BNB` : ''].filter(Boolean).join('，');
+const fmtVol = (v, n) => v == null ? '—' : `${+v.toFixed(3)} BNB${n != null ? `<small>${n} 笔</small>` : ''}`;
+function mineMarkup() {
+  const d = R.mine; if (!d) return '<div class="empty">读取中…</div>';
+  const note = d.error ? `<div class="nft-mine-note">${esc(d.error)}</div>` : '';
+  const rows = d.rows || [];
+  const body = rows.length ? rows.map((m) => {
+    const link = m.status === 'ok' ? `<a href="https://web3.okx.com/zh-hans/nft/collection/bsc/${encodeURIComponent(m.contract)}" target="_blank" rel="noopener noreferrer">OKX</a>` : '';
+    const al = m.alert ? `<span class="nft-mine-hot">${esc(alertText(m.alert))}</span> <button data-nft-ack="${esc(m.contract)}">已读</button>` : '';
+    return `<div class="nft-mine-row${m.alert ? ' hot' : ''}"><span><b>${esc(m.name || m.contract.slice(0, 10))}</b><small>${esc(m.contract)}</small></span><span>${m.count}</span><span>${fmtFloor(m)}</span><span>${fmtVol(m.volume24h, m.trades24h)}</span><span>${fmtVol(m.volume)}</span><span>${m.owners ?? '—'}</span><span>${al}${link}</span></div>`;
+  }).join('') : '<div class="empty">还没有 mint 到的 NFT</div>';
+  const strip = (d.alerts || []).map((a) => { const m = rows.find((r) => r.contract === a.contract); return `<div class="nft-mine-strip"><b>${esc(m?.name || a.contract.slice(0, 10))}</b><span>${esc(alertText(a))}</span><button data-nft-ack="${esc(a.contract)}">已读</button></div>`; }).join('');
+  const when = d.checkedAt ? '上次查询 ' + fmtT(d.checkedAt) : '尚未查询';
+  const intervals = [5, 10, 15, 30, 60, 180, 360, 1440].map((n) => `<option value="${n}"${n === d.intervalMin ? ' selected' : ''}>${n >= 60 ? n / 60 + ' 小时' : n + ' 分钟'}</option>`).join('');
+  return `<div class="nft-manager-head"><div><h2>我的 NFT</h2><p>${when}${d.partial ? ' · 持仓读取不完整' : ''} · 价格来自 OKX NFT 市场，只读，不会动你的钱包</p></div><div class="nft-history-tools"><button class="nft-action" data-nft-market-refresh>${d.running ? '查询中…' : '刷新价格'}</button></div></div>${note}${strip}
+  <div class="nft-settings-card nft-mine-settings"><h3>涨价 / 成交提醒</h3>
+    <label class="nft-setting-row"><span>地板价涨到<small>达到后提醒我</small></span><span class="nft-unit"><input type="number" min="0" step="0.01" value="${d.minFloor}" data-nft-minfloor><i>BNB</i></span></label>
+    <label class="nft-setting-row"><span>24 小时成交量达到<small>填 0 表示不按成交量提醒</small></span><span class="nft-unit"><input type="number" min="0" step="0.1" value="${d.minVolume24h ?? 1}" data-nft-minvol><i>BNB</i></span></label>
+    <label class="nft-setting-row"><span>多久检查一次<small>最短 5 分钟，太频繁会被限制访问</small></span><select data-nft-interval>${intervals}</select></label>
+    <div class="nft-mine-btns"><button class="nft-action primary" data-nft-minfloor-save>保存设置</button></div>
+  </div>
+  <div class="nft-mine-table"><div class="nft-mine-row nft-mine-head"><span>项目</span><span>持有</span><span>地板价</span><span>24h 成交量</span><span>总成交量</span><span>持有人数</span><span>操作</span></div>${body}</div>`;
+}
+let lastAlertAt = 0, alertsSeeded = false;
+async function pollAlerts() {
+  try {
+    const r = await fetch('/api/nft/market/alerts', { headers: HDR }); if (!r.ok) return;
+    const { alerts = [] } = await r.json();
+    document.querySelector('#viewSw [data-view="nft"]')?.classList.toggle('has-alert', alerts.length > 0);
+    const newest = alerts.reduce((t, a) => Math.max(t, a.at || 0), 0);
+    if (newest > lastAlertAt) {
+      if (alertsSeeded) { const a = alerts.find((x) => x.at === newest); showAlertToast('NFT 提醒：' + alertText(a)); }
+      lastAlertAt = newest;
+    }
+    alertsSeeded = true;
+  } catch { /* 下次再试 */ }
+}
+function showAlertToast(text) {
+  const t = document.createElement('div'); t.className = 'nft-alert-toast'; t.textContent = text; t.addEventListener('click', () => { location.hash = '#/nft'; t.remove(); });
+  document.body.append(t); setTimeout(() => t.remove(), 12000);
+}
+async function mineAction(path, body) {
+  if (path.endsWith('/config')) R.mineDirty = false;
+  const r = await fetch(path, { method: 'POST', headers: { ...HDR, 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || ('失败 ' + r.status)); }
+  R.mineAt = 0; await loadMine(); pollAlerts();
 }
 
 // 图片加载失败就拿掉 <img>，露出底下的字母（页面 CSP 不允许行内 onerror，所以用捕获监听）
@@ -273,6 +329,9 @@ document.addEventListener('click', async (e) => {
   if (e.target.closest('[data-nft-back]')) { R.selected = null; render(); return; }
   const filter = e.target.closest('[data-nft-filter]');
   if (filter && R.active) { R.filter = filter.dataset.nftFilter; $$('[data-nft-filter]').forEach((b) => b.classList.toggle('active', b === filter)); render(); return; }
+  if (e.target.closest('[data-nft-minfloor-save]')) { await mineAction('/api/nft/market/config', { minFloor: Number($('[data-nft-minfloor]')?.value), minVolume24h: Number($('[data-nft-minvol]')?.value), intervalMin: Number($('[data-nft-interval]')?.value) }); return; }
+  if (e.target.closest('[data-nft-market-refresh]')) { await mineAction('/api/nft/market/refresh'); return; }
+  const ackBtn = e.target.closest('[data-nft-ack]'); if (ackBtn) { await mineAction('/api/nft/market/ack', { contract: ackBtn.dataset.nftAck }); return; }
   const mode = e.target.closest('[data-nft-mode]');
   if (mode && R.active) { R.mode = mode.dataset.nftMode; $$('[data-nft-mode]').forEach((b) => b.classList.toggle('active', b.dataset.nftMode === R.mode)); render(); return; }
   if (e.target.closest('[data-nft-skip]') && R.active) { R.showSkip = !R.showSkip; render(); return; }
@@ -301,9 +360,12 @@ document.addEventListener('change', (e) => {
   const key = rule.dataset.nftRule, val = rule.type === 'checkbox' ? rule.checked : rule.type === 'number' ? Number(rule.value) : rule.value;
   saveAuto({ rules: { [key]: key === 'exclude' ? val.split(/[,，\s]+/).filter(Boolean) : val } });
 }, true);
+document.addEventListener('input', (e) => { if (e.target.closest?.('[data-nft-minfloor],[data-nft-minvol],[data-nft-interval]')) R.mineDirty = true; });
 window.addEventListener('hashchange', () => setVisible(isNftRoute()));
 window.addEventListener('bsc:leave-nft', () => { if (R.active) setVisible(false); });
 ensureFloatPanel();
 setVisible(isNftRoute());
 loadAuto();
 setInterval(loadAuto, 15000);
+pollAlerts();
+setInterval(pollAlerts, 30000);

@@ -54,6 +54,7 @@
 
 **NFT**
 - **NFT radar:** lists newly launched NFT projects in real time, keeping only those that require an Agent ID, and flags the ones that match your auto-mint rules.
+- **My NFTs:** floor price and volume for every project you minted, with alerts when they pass your thresholds (read-only, no key).
 - **Auto-mint:** free projects are minted automatically (gas only); paid projects are always manual.
 - **Manual mint:** open any project and mint a quantity you choose. Paid projects are quoted first, show the estimated cost in a dialog, and send a transaction only after a second confirmation.
 - **Latest-NFT float:** open it from any page and dock it left or right.
@@ -108,6 +109,8 @@ The page shows a **guide plus a self-check**. Follow it in order:
 - By default only projects that appear **after** you turn it on are handled (you can also choose to include existing ones). Handled projects are never minted twice; failures are retried for a while.
 - The switch is yours alone: **refreshing the page or restarting the service never changes it**. If it was on when you restarted, it keeps running; turn it off yourself to stop.
 - The page shows success / failure reports, total stats and mint history (queryable by task time window).
+
+**My NFTs** (NFT -> My NFTs): shows floor price, 24h volume, total volume and owner count for the projects you minted. When the floor price or 24h volume reaches your threshold (volume defaults to 1 BNB, 0 turns it off), the NFT nav button shows a red dot and a pop-up appears; the check interval is selectable from 5 minutes to 24 hours. Data is read from OKX NFT marketplace's public pages: no key, read-only, never touches your wallet. A floor price is only a reference (a listing nobody buys is not value), 24h volume is the better signal.
 
 **Manual mint:** open any project's details, enter a quantity and click **Manual mint**.
 - Free projects: minted right away.
