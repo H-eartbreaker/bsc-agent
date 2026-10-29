@@ -1448,3 +1448,15 @@ body { min-width: 1220px; overflow-x: auto; overflow-y: hidden; }
 .nft-manager-metrics b.bad, .nft-muted.bad { color: var(--r); }
 .nft-settings-card input[type="text"], .nft-settings-card input[type="number"] { height: 28px; border: 1px solid var(--line2); border-radius: 6px; background: var(--panel2); color: var(--text); padding: 0 8px; }
 .nft-history-row small { display: block; color: var(--muted); }
+
+/* 窗口比桌面画布窄时（见 fit.js）整体等比缩小，结构不变；视口高度按缩放比例补偿。 */
+html.fit .layout, html.fit .hold, html.fit .pulse.trench, html.fit #track, html.fit #snipe, html.fit .nft-workspace {
+  height: calc(var(--vp-h) - var(--headerH) - var(--footerH) - var(--favH, 0px));
+}
+html.fit .hold-gang { height: calc(var(--vp-h) - var(--headerH) - var(--footerH) - var(--favH, 0px) - 46px); }
+html.fit .nft-new-list { max-height: calc(var(--vp-h) - 230px); }
+
+/* 持仓统计卡：数字与斜杠保持同一行（旧样式把里面的 span 变成了块级）。 */
+#hold .hold-tot { align-items: stretch; }
+#hold .hold-stat > b > span, #hold .hold-stat > b > small { display: inline; }
+#hold .hold-stat { min-width: 152px; min-height: 0; align-self: flex-start; }

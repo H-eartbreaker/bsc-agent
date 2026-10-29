@@ -4,9 +4,20 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.3.8
+**NFT**
+- New-project data is now pushed by the author and pulled automatically every minute — **no Telegram setup needed**. When the author isn't watching, the page shows "feed stopped".
+
+**Interface**
+- When the window gets narrower the whole page scales down with the layout unchanged, instead of being cut off or scrolling sideways.
+- Fixed the holdings summary cards (profit / loss) splitting the numbers over three lines and stretching the card.
+
+**Docs**
+- README rewritten: separate Mac and Windows install steps and a complete feature overview.
+
 ## 0.3.7
 **New: NFT radar and auto-mint**
-- New **NFT** tab: watches a Telegram new-project channel (set `TG_*` in `.env`, sign in once with `node scripts/tg-login.mjs`). Project grid, rule matches, mint history and task manager live here; a "Latest NFT" float on the side can dock left / right and is visible site-wide.
+- New **NFT** tab: new-project data is watched and pushed by the author and pulled automatically by your app — no setup. Project list, rule matches, mint history and task manager live here; a "Latest NFT" float docks left / right and is visible site-wide. When the author isn't watching, the page says the feed has stopped.
 - Auto-mint runs on the server: only free (`value=0`) projects with an Agent ID, optional website / X filters and exclude keywords, every mint passes `baw contract-call preview` first, and paid ones are never auto-executed. Failures retry after 2m / 10m / 30m / 2h (within 12h) and a broadcast transaction is never re-sent. The page shows success / failure reports and totals; the task is not resumed after a restart.
 - Task lights at the top: sniper / copy-trade / NFT show green when on, grey when off.
 

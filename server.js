@@ -33,6 +33,8 @@ import { nftFeedList, nftFeedOne, readNftFeed } from './engine/nft/feedApi.js';
 import { readMintHistory, summarize } from './engine/nft/mintLog.js';
 import { AutoMint, scriptRunner } from './engine/nft/autoMint.js';
 import { WatchSupervisor } from './engine/nft/watchSupervisor.js';
+import { FeedSync, DEFAULT_FEED_URL } from './engine/nft/feedSync.js';
+import { FeedPublisher } from './engine/nft/feedPublish.js';
 
 // 日志脱敏：控制台 / live.log 里出现的 RPC 地址（含 NodeReal key）一律打码
 for (const k of ['log', 'info', 'warn', 'error']) { const f = console[k].bind(console); console[k] = (...a) => f(...a.map((x) => (typeof x === 'string' ? redactSecrets(x) : x instanceof Error ? redactSecrets(x.stack || x.message) : x))); }
@@ -53,6 +55,9 @@ const nftChildEnv = () => {
   return env;
 };
 const nftWatcher = new WatchSupervisor({ root: __dirname, log: (m) => console.log(m) });
+// 普通用户拉作者发布的数据；作者自己（配了 Telegram 监听）本地监听，并可把数据发布给别人
+const nftSync = new FeedSync({ url: process.env.NFT_FEED_URL || DEFAULT_FEED_URL, file: NFT_FEED_FILE, log: (m) => console.log(m) });
+const nftPublisher = new FeedPublisher({ file: NFT_FEED_FILE, token: process.env.NFT_FEED_GIST_TOKEN, gistId: process.env.NFT_FEED_GIST_ID, log: (m) => console.log(m) });
 
 // MODE=live：真实行情（shrine + Flap Agent Curve Reader + fsi）+ baw 报价/预演；再加 LIVE_TRADE=1 才能真实下单；自动还需本人开启策略
 const LIVE = MODE === 'live';
@@ -177,7 +182,7 @@ app.get('/api/nft/mint-history', (req, res) => {
   res.json({ rows, summary: summarize(rows) });
 });
 // NFT 自动 mint 任务（免费才自动；付费永远手动）。开启后真实发送免费 mint；规则里勾「试运行」则只检查
-app.get('/api/nft/auto', (req, res) => res.json({ ...nftAuto.view(), canExecute: LIVE && LIVE_TRADE, watcher: nftWatcher.status() }));
+app.get('/api/nft/auto', (req, res) => res.json({ ...nftAuto.view(), canExecute: LIVE && LIVE_TRADE, watcher: nftWatcher.status(), source: nftWatcher.configured() ? 'watch' : 'sync', feed: nftSync.status(), publisher: nftPublisher.status() }));
 app.post('/api/nft/auto', (req, res) => {
   const b = req.body || {};
   const nextOn = typeof b.enabled === 'boolean' ? b.enabled : nftAuto.state.enabled, nextDry = typeof b.rules?.dry === 'boolean' ? b.rules.dry : nftAuto.state.rules.dry;
@@ -748,4 +753,5 @@ server.listen(PORT, process.env.HOST || '127.0.0.1', () => {
   if (LIVE) console.log(`  baw：${trader.status.connected ? `已连接 ${trader.wallets[0].address}` : `未连接（${trader.status.error}）`}`);
   console.log(`  ➜  http://localhost:${PORT}\n`);
   nftAuto.start(); nftWatcher.start();
+  if (nftWatcher.configured()) nftPublisher.start(); else if (process.env.NFT_FEED_SYNC !== '0') nftSync.start();
 });

@@ -121,7 +121,14 @@ function manager() {
   const au = R.auto, rules = au?.rules;
   if (!au || !rules) return '<div class="empty">自动 mint 服务暂不可用（服务没重启或离线）。重启一次本地服务即可。</div>';
   const w = au.watcher || {}, on = !!au.enabled, dry = !!rules.dry;
-  const watcherTxt = w.state === 'running' ? '监听运行中' : w.state === 'external' ? '监听由外部进程运行' : w.state === 'restarting' ? '监听重连中' : w.configured ? '监听待启动' : '监听未配置（见 README「NFT 监听」）';
+  const ago = (t) => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? '刚刚' : m < 60 ? m + ' 分钟前' : Math.round(m / 60) + ' 小时前'; };
+  const f = au.feed || {};
+  const watcherTxt = au.source === 'watch'
+    ? (w.state === 'running' ? '本机监听运行中' : w.state === 'external' ? '监听由外部进程运行' : w.state === 'restarting' ? '监听重连中' : '监听待启动')
+    : f.state === 'nourl' ? '数据源还没配置，暂时没有新项目推送'
+    : !f.updatedAt ? (f.state === 'error' ? '新项目数据拉取失败，稍后自动重试' : '正在获取新项目数据')
+    : f.stale ? `作者的推送已停止（最后更新 ${ago(f.updatedAt)}），已有项目不受影响`
+    : `新项目数据来自作者推送，更新于 ${ago(f.updatedAt)}`;
   const mode = !on ? '未开启' : dry ? '试运行中（不发交易）' : '真实 mint 中';
   const opt = (v, cur, label) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${label}</option>`;
   const s = R.summary || { projectsOk: 0, nftsMinted: 0, failed: 0, gasBnb: 0 };

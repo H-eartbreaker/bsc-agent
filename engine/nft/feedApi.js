@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 
-function clean(row) {
+export function cleanRow(row) {
   if (!row || typeof row !== 'object') return null;
   const contract = String(row.contract || '').toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(contract)) return null;
@@ -31,7 +31,7 @@ export function readNftFeed(file) {
   if (!existsSync(file)) return [];
   try {
     const rows = JSON.parse(readFileSync(file, 'utf8'));
-    return Array.isArray(rows) ? rows.map(clean).filter(Boolean) : [];
+    return Array.isArray(rows) ? rows.map(cleanRow).filter(Boolean) : [];
   } catch {
     return [];
   }

@@ -12,7 +12,7 @@
   <img src="docs/screenshots/trenches-demo.png" alt="Trenches view (demo data, no wallet information)" />
 </p>
 
-> **In one line:** download → `./install.sh` → `./start.sh` → sign in to your Binance wallet in the browser and you're ready. Private keys never live on this machine, and the service listens on `127.0.0.1` only.
+> **In one line:** download → install (Mac: `./install.sh`, Windows: double-click `install.bat`) → start (`./start.sh` / `start.bat`) → sign in to your Binance wallet in the browser and you're ready. **Works on Mac, Windows and Linux.** Private keys never live on this machine, and the service listens on `127.0.0.1` only.
 
 ---
 
@@ -35,22 +35,32 @@
 - **Quick trade:** quick buy, sell-all, slippage, and allowance review / revoke. Trades go through Binance's aggregator and fall back to PancakeSwap V2 directly for brand-new pools the aggregator doesn't know.
 - **Tracking / copy trading:** follow smart-money addresses and copy their buys with your own amount, take-profit and stop-loss.
 - **gang.fun sniping:** buy new launches right away. You decide how much per buy, how many tokens per day (unlimited by default) and the auto-sell rules.
+- **NFT radar + auto-mint (new in 0.3.7):** new projects are watched and pushed by the author (no setup on your side) and the "free + Agent ID" ones are flagged. With auto-mint on, the server mints free projects automatically (gas only; paid ones are always manual). Filter by website / X, set exclude keywords, see success / failure reports and total minted stats, and query history by task time window. See "NFT radar and auto-mint" below.
+- **Latest-NFT float:** open the "Latest NFT" float from any page (trenches included) and dock it left or right.
+- **Task lights:** the sniper / copy-trade / NFT tasks at the top show green when on and grey when off.
+- **Unified UI:** all sub-navigation uses the same underline tabs, with consistent type sizes, cards and spacing; when the window gets narrower the whole page scales down instead of reflowing.
 - **Free-mint script:** `node scripts/free-mint.mjs 0xContract…` probes the free quantity, runs a `baw` preview safety check and only then mints; paid mints are only quoted, never executed; `--dry` checks without sending.
 - **Pause everything:** one button in the top-right stops tracking and sniping together.
 - **Self-check page:** wallet, live-trading switch and every module at a glance, with plain-language hints when something is wrong.
 - **Single wallet:** only the one Binance Agentic Wallet you sign in with. There are no multi-wallet options in the interface.
 
 ## Quick start (3 minutes)
-**Requirements:** macOS, Linux or Windows, Node.js 22 or newer.
+**Requirements:** Mac, Windows or Linux, and Node.js 22 or newer (download from <https://nodejs.org>; on Windows reopen the window after installing).
 
-```
-
-**Windows:** install [Node.js 22+](https://nodejs.org), download/clone the project, double-click `install.bat`, then `start.bat` (or run them in PowerShell).bash
+### Mac / Linux
+```bash
 git clone https://github.com/H-eartbreaker/bsc-agent.git
 cd bsc-agent
 ./install.sh      # checks Node, installs dependencies, creates .env, installs the Binance wallet CLI (baw)
 ./start.sh        # starts the service and opens http://localhost:8787
 ```
+No git? On the GitHub page click **Code → Download ZIP**, unzip, open a terminal in that folder and run the same two commands.
+
+### Windows
+1. On the GitHub page click **Code → Download ZIP** and unzip it anywhere (or `git clone` if you have git).
+2. **Double-click `install.bat`**: checks Node, installs dependencies, creates `.env` and installs the Binance wallet CLI `baw`.
+3. **Double-click `start.bat`**: starts the service and opens <http://localhost:8787>. Close the black window to quit.
+4. If Windows Firewall or your antivirus asks the first time, choose Allow. If installing `baw` automatically fails, open Command Prompt **as Administrator** and run `npm i -g @binance/agentic-wallet`.
 
 The first launch shows a **guide plus a self-check**. Follow it in order:
 1. **Sign in to the Binance wallet:** a sign-in window pops up in the middle of the page. Click **Sign in to Binance wallet** → open the link it gives you → check the pairing code → confirm in the **Binance App**. The page detects it automatically; no commands needed. (If the wallet tool isn't installed, the window shows the install command with a Copy button.)
@@ -63,12 +73,15 @@ The first launch shows a **guide plus a self-check**. Follow it in order:
 ## Using the interface
 | Where | What it does |
 |---|---|
-| Top navigation: Market / Trenches / Tracking·Sniping | The three main pages, text navigation with the current page highlighted |
+| Top navigation: Market / Trenches / Holdings / Tracking / Sniping / NFT | The main pages, text navigation with the current page highlighted; each page's sub-navigation sits at the top of its content |
+| Task lights (top) | Sniper / copy-trade / NFT tasks: green = on, grey = off |
+| "Latest NFT" button | A site-wide new-project float that docks left or right |
 | GitHub icon (top-right) | Opens the project repository; shows a red dot and a pop-up when a new version is on GitHub |
 | Wallet name + balance (top-right) | Click to copy the wallet address and see the sign-in status |
 | Trench column header | Keyword search, per-column ⚡ buy amount, P1–P3 presets, sound, hidden-token count, filter funnel |
 | Trench card | Click the MC / buy area on the right to ⚡ buy; ⊘ to hide a token; click the card for details |
-| Tracking / gang.fun sniping | Fixed switcher at the top; set the amount, save, then turn on (real buying) |
+| Tracking / Sniping | Separate pages; set the amount, save, then turn on (real buying) |
+| NFT | Project list / auto-mint manager / mint history tabs; data comes from the author's feed, no setup |
 | Left token list | Drag the divider to resize; double-click it to reset |
 | Footer: self-check / version | Self-check page, version number and update notice |
 
@@ -111,15 +124,16 @@ Copy `.env.example` to `.env` and adjust as needed (`install.sh` already does th
 | `BSC_AGENT_UPDATE` | on | Set `0` to turn the reminder off |
 | `MYSQL_URL` / `REDIS_URL` | empty | Optional history cache; `scripts/enable-cache.sh` starts both with Docker |
 
-## NFT radar and auto-mint (optional)
-Watches a Telegram new-project channel, lists "free + Agent ID" projects under the **NFT** page, and can **auto-mint** them. Leave it blank if you don't need it.
+## NFT radar and auto-mint
+**Works out of the box — no setup.** New projects on the **NFT** page are watched and pushed by the author; your app pulls them once a minute. Open **Auto-mint manager**, set your rules and you're done.
 
-1. Get an `api_id` / `api_hash` at <https://my.telegram.org> and put them in `.env` as `TG_API_ID` / `TG_API_HASH`, plus the channel to watch as `TG_CHANNEL_ID` (the login script lists channel ids).
-2. Run `node scripts/tg-login.mjs` once to sign in (creates `data/tg-session.txt` locally — **never share or commit it**).
-3. Restart the service, open **NFT** → task manager, set your rules and turn auto-mint on.
-
-Rules: only **free** mints (`value=0`) are executed; paid ones are only shown, never auto-run. Every mint first passes `baw contract-call preview`, and only gas is spent. You can filter by website / X, set exclude keywords, and see success / failure reports and total minted stats. The auto task is **not resumed after a restart** — turn it back on manually.
-> The parser is built for the Aibot channel message format; other formats may not parse.
+- Only **free** mints (`value=0`) for projects with an Agent ID; paid ones are only shown, never auto-run.
+- Each project is simulated on-chain, then passes `baw contract-call preview`; a transaction is sent only if both pass, and only gas is spent.
+- Filter by website / X, set exclude keywords; see success / failure reports, total minted stats and history (queryable by task time window).
+- Try **dry run** first (no transactions), check one round of reports, then switch to real minting.
+- The auto task is **not resumed after a restart** — turn it back on manually.
+- The feed comes from the author's machine: when the author isn't watching there are no new projects and the page says "feed stopped"; existing projects and your settings are unaffected.
+- To opt out, set `NFT_FEED_SYNC=0` in `.env`.
 
 ## FAQ
 - **Tokens have no avatars and the pool shows "—"?** Avatars, pool size and charts come from overseas data sites. The app finds a proxy automatically (direct first, then the system proxy, then common ports). If there are still no avatars, open your proxy app, then open **🩺 Self-check** in the footer: under "can reach the market data sites" there is an input box. Paste the HTTP proxy address from your proxy app (like `http://127.0.0.1:port`; look for "HTTP proxy port" or "mixed port" in Clash / V2Ray settings) and click **Save & test**. It takes effect immediately, no restart.
