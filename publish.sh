@@ -12,9 +12,10 @@ export GIT_INDEX_FILE="$(git rev-parse --git-dir)/tmp-index"; rm -f "$GIT_INDEX_
 git read-tree origin/main                      # 先拿远端现有内容（它的 .gitignore / .env.example 会保留）
 git ls-tree -r HEAD | git update-index --index-info   # 再把本地内容盖上去
 git add -f scripts/check-legacy-name.sh
+git rm -q --cached --ignore-unmatch docs/screenshots/trenches-demo.png   # 本地已删的演示截图，要同步从远端删掉
 TREE=$(git write-tree); [ -n "${TREE}" ] || { echo "✗ 内容树为空，已停止"; exit 1; }; unset GIT_INDEX_FILE; rm -f "$(git rev-parse --git-dir)/tmp-index"
 if [ "$TREE" = "$(git rev-parse origin/main^{tree})" ]; then echo "远端已是最新，无需推送"; exit 0; fi
-C=$(git commit-tree "$TREE" -p origin/main -m "chore: sync public release and add repo checks
+C=$(git commit-tree "$TREE" -p origin/main -m "release 0.3.9: NFT manual mint, Agent-ID feed, bilingual README
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01WySNg1WtPPZ9s43U4G3hht")

@@ -4,7 +4,8 @@
 //   node scripts/free-mint.mjs 0xAddr1 Name=0xAddr2 ...        # 直接给合约
 //   node scripts/free-mint.mjs --file mints.txt                 # 文件里每行「名字 0x合约」或只写 0x合约
 //   加 --dry 只检查不发交易；--max 10 最多试几枚；--from 0x… 指定钱包（默认取 baw 的 EVM 地址）；--json-out 路径 额外把结果写到该文件
-// 规则：只做 value=0 的 mint；preview 有任何异常（扣费/授权/风险/非 NFT 转入）就放弃该项；付费的只报告价格，不执行。
+// 规则：默认只做 value=0 的 mint；preview 有任何异常（扣费/授权/风险/非 NFT 转入）就放弃该项。
+// 付费只在手动流程里：--quote --qty N 只算价格/gas 不发交易；用户确认后再 --value-wei <确认的金额> --qty N 才会发付费交易（金额不会超过确认值）。自动任务永远不传这两个参数。
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -14,8 +15,15 @@ import { ethers } from 'ethers';
 const argv = process.argv.slice(2);
 const flag = (n) => argv.includes(n);
 const opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
-const DRY = flag('--dry');
+const QUOTE = flag('--quote');
+const DRY = flag('--dry') || QUOTE;
 const MAX = Math.max(1, Math.min(50, Number(opt('--max', 10)) || 10));
+const QTY = Math.max(0, Math.min(50, Math.floor(Number(opt('--qty', 0))) || 0));   // 手动指定数量：只试这个数量，能过就 mint 这么多
+const unitArg = opt('--unit-wei'), valueArg = opt('--value-wei');
+const UNIT_WEI = /^\d+$/.test(unitArg || '') ? BigInt(unitArg) : null;
+const VALUE_WEI = /^\d+$/.test(valueArg || '') ? BigInt(valueArg) : null;
+const MAX_VALUE = ethers.parseEther(process.env.NFT_MANUAL_MAX_BNB || '0.5');
+if ((QUOTE || VALUE_WEI !== null) && !QTY) { console.error('付费流程必须指定 --qty'); process.exit(1); }
 const BAW = process.env.BAW_BIN || 'baw';
 const RPC = process.env.RPC_URL || 'https://bsc-dataseed.binance.org';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -25,7 +33,7 @@ const LOGS = path.join(ROOT, 'data', 'mint-logs');
 const targets = [];
 const addTarget = (name, addr) => { if (!targets.some((t) => t.addr.toLowerCase() === addr.toLowerCase())) targets.push({ name: name || addr.slice(0, 8), addr: ethers.getAddress(addr.toLowerCase()) }); };
 for (let i = 0; i < argv.length; i++) {
-  if (['--file', '--max', '--from', '--json-out'].includes(argv[i])) { i++; continue; }
+  if (['--file', '--max', '--qty', '--from', '--json-out', '--unit-wei', '--value-wei'].includes(argv[i])) { i++; continue; }
   const m = argv[i].match(/^(?:([^=]+)=)?(0x[0-9a-fA-F]{40})$/);
   if (m) addTarget(m[1], m[2]);
 }
@@ -39,6 +47,17 @@ if (!targets.length) { console.error('没有合约地址。用法见脚本顶部
 const sh = (args) => new Promise((resolve) => execFile(BAW, args, { env: process.env, maxBuffer: 1e7, shell: process.platform === 'win32' }, (e, so, se) => {   // Windows 上 baw 是 .cmd，必须经过 shell
   const raw = so || se || String(e); try { resolve(JSON.parse(raw)); } catch { resolve({ success: false, raw: raw.slice(0, 400) }); }
 }));
+// 只读类调用（取地址、preview）遇到网络抖动自动重试；execute 绝不重试，避免重复发交易
+const NET_ERR = /NETWORK_ERROR|socket|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|TLS/i;
+const shRetry = async (args, tries = 4) => {
+  let r;
+  for (let i = 0; i < tries; i++) {
+    r = await sh(args);
+    if (r?.success || !NET_ERR.test(JSON.stringify(r))) return r;
+    await new Promise((x) => setTimeout(x, 1500 * (i + 1)));
+  }
+  return r;
+};
 const clock = (t = Date.now()) => new Date(t).toLocaleTimeString('zh-CN', { hour12: false });
 const RPCS = [...new Set([RPC, 'https://bsc-dataseed.bnbchain.org', 'https://bsc-dataseed1.defibit.io', 'https://bsc-dataseed1.ninicoin.io'])];
 const nodes = RPCS.map((u) => new ethers.JsonRpcProvider(u, 56, { staticNetwork: true }));
@@ -89,26 +108,44 @@ function argBuilder(fn) {
 }
 const hasQty = (fn) => fn.inputs.some((p) => p.type.startsWith('uint'));
 
+const PRICE_FN = /^(price|mintprice|cost|mintcost|fee|mintfee|publicprice|saleprice|publicmintprice|pricepermint|nftprice|tokenprice)$/i;
+async function unitPrices(iface, addr) {
+  const out = new Set(UNIT_WEI ? [UNIT_WEI] : []);
+  for (const f of iface.fragments.filter((f) => f.type === 'function' && (f.stateMutability === 'view' || f.stateMutability === 'pure') && f.inputs.length === 0 && PRICE_FN.test(f.name))) {
+    try { const v = await rpc((n) => new ethers.Contract(addr, iface, n)[f.name]()); if (typeof v === 'bigint' && v > 0n) out.add(v); } catch { /* 读不到就忽略 */ }
+  }
+  return [...out];
+}
+// 某个数量可用的付款额：默认只试 0；确认后的执行只试确认过的金额；报价时 0 → 各个单价×数量，取最便宜能过的
+const valuesFor = (q, units) => (VALUE_WEI !== null ? [VALUE_WEI] : QUOTE ? [0n, ...units.map((u) => u * BigInt(q))].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)) : [0n]);
+
 async function probe(t) {
   const t0 = Date.now();
   const { verified, abi } = await loadAbi(t.addr);
   const iface = new ethers.Interface(abi);
+  const units = QUOTE ? await unitPrices(iface, t.addr) : [];
   const fns = iface.fragments.filter((f) => f.type === 'function' && /mint|claim/i.test(f.name) && f.stateMutability !== 'view' && f.stateMutability !== 'pure');
   const cands = [];
   for (const fn of fns) {
     const build = argBuilder(fn); if (!build) continue;
-    const qs = hasQty(fn) ? Array.from({ length: MAX }, (_, i) => i + 1) : [1];
+    const qs = hasQty(fn) ? (QTY ? [QTY] : Array.from({ length: MAX }, (_, i) => i + 1)) : [1];
     const sims = await Promise.all(qs.map(async (q) => {
-      try { await rpc((n) => n.estimateGas({ from: ME, to: t.addr, data: iface.encodeFunctionData(fn, build(q)), value: 0 })); return { q, ok: true }; }
-      catch (e) { return { q, ok: false, why: (e.reason || e.shortMessage || e.message || '').replace(/^execution reverted:?\s*/, '').slice(0, 80) || 'revert' }; }
+      const data = iface.encodeFunctionData(fn, build(q));
+      let why = '';
+      for (const value of valuesFor(q, units)) {
+        try { const gas = await rpc((n) => n.estimateGas({ from: ME, to: t.addr, data, value })); return { q, ok: true, value, gas }; }
+        catch (e) { why = why || (e.reason || e.shortMessage || e.message || '').replace(/^execution reverted:?\s*/, '').slice(0, 80) || 'revert'; }
+      }
+      return { q, ok: false, why };
     }));
-    let best = 0; for (const s of sims) { if (s.ok) best = s.q; else break; }
-    if (best) cands.push({ fn, q: best, data: iface.encodeFunctionData(fn, build(best)) });
+    let best = null; for (const s of sims) { if (s.ok) best = s; else break; }
+    if (QTY && !hasQty(fn) && QTY > 1) { cands.push({ fn, q: 0, why: '这个合约一次只能 mint 1 个' }); continue; }
+    if (best) cands.push({ fn, q: best.q, value: best.value, gas: best.gas, data: iface.encodeFunctionData(fn, build(best.q)) });
     else cands.push({ fn, q: 0, why: sims[0].why });
   }
   const win = cands.filter((c) => c.q).sort((a, b) => b.q - a.q)[0];
   const info = { ...t, verified, probeMs: Date.now() - t0 };
-  if (win) return { ...info, fn: win.fn.format('sighash'), qty: win.q, to: t.addr, data: win.data };
+  if (win) return { ...info, fn: win.fn.format('sighash'), qty: win.q, to: t.addr, data: win.data, value: win.value, gas: win.gas };
   // 免费路径全不通：读一下价格提示，只报告不执行
   const hints = [];
   for (const f of iface.fragments.filter((f) => f.type === 'function' && (f.stateMutability === 'view' || f.stateMutability === 'pure') && f.inputs.length === 0 && /price|cost|fee/i.test(f.name))) {
@@ -117,18 +154,22 @@ async function probe(t) {
   return { ...info, skip: cands.length ? '免费路径不通：' + cands.map((c) => `${c.fn.name}(${c.why})`).join('；') : verified ? '没有认得出的 mint 函数' : '无公开 ABI，盲试常见函数也不通', hints };
 }
 
-// preview 安全检查：不通过就不执行
-function judge(r) {
+// preview 安全检查：不通过就不执行。value>0（用户确认过的付费 mint）只放行「付了确认金额的 BNB」这一项扣费
+const near = (a, b) => Number.isFinite(a) && b > 0 && Math.abs(a - b) <= b * 1e-4;
+function judge(r, value = 0n) {
   if (!r?.success) return 'preview 失败：' + (r?.raw || r?.message || r?.msg || JSON.stringify(r).slice(0, 120));
   const s = r.data?.simulationResult || {}, risks = r.data?.risks || {};
+  const vBnb = Number(ethers.formatEther(value)), vWei = Number(value);
+  const isPay = (x) => value > 0n && (near(Math.abs(Number(x)), vBnb) || near(Math.abs(Number(x)), vWei));
   if (s.simulationCode !== '000000000') return '模拟未通过 ' + s.simulationCode + ' ' + (s.simulationErrorDetail || '');
   if (s.authorityChanges?.length) return '含授权变更';
   if (s.allowanceChanges?.length) return '含额度变更';
   if (risks.riskDetails?.length || risks.riskBehaviors?.length) return '有风险标记 ' + JSON.stringify(risks).slice(0, 160);
-  if (Number(s.gasTokenFromData || 0) > 0) return '交易里带了转账/扣费';
-  const bad = (s.balanceChanges || []).filter((b) => !(/^Erc(721|1155)$/i.test(b.tokenType) && Number(b.change) > 0));
+  if (Number(s.gasTokenFromData || 0) > 0 && !isPay(s.gasTokenFromData)) return '交易里带了转账/扣费';
+  const nft = (b) => /^Erc(721|1155)$/i.test(b.tokenType) && Number(b.change) > 0;
+  const bad = (s.balanceChanges || []).filter((b) => !nft(b) && !(isPay(b.change) && Number(b.change) < 0 && /bnb|native|coin/i.test(`${b.tokenType} ${b.symbol || b.tokenSymbol || ''}`)));
   if (bad.length) return '有非 NFT 转入的资产变化 ' + JSON.stringify(bad).slice(0, 160);
-  if (!(s.balanceChanges || []).length) return '模拟里没有任何 NFT 转入';
+  if (!(s.balanceChanges || []).some(nft)) return '模拟里没有任何 NFT 转入';
   return null;
 }
 
@@ -137,7 +178,7 @@ const addrOf = (topic) => ('0x' + topic.slice(26)).toLowerCase();
 
 let ME = opt('--from');
 if (!ME) {
-  const a = await sh(['wallet', 'address', '--json']);
+  const a = await shRetry(['wallet', 'address', '--json']);
   ME = a?.data?.addresses?.find((x) => x.binanceChainId === '56' || /^0x/.test(x.address))?.address;
   if (!ME) { console.error('取不到钱包地址（baw 没登录或没连上代理？）：', JSON.stringify(a).slice(0, 200)); process.exit(1); }
 }
@@ -147,14 +188,26 @@ console.log(`钱包 ${ME}  余额 ${ethers.formatEther(bnb0)} BNB  合约 ${targ
 
 // 1) 并行：找 ABI + 模拟
 const probed = await Promise.all(targets.map(probe));
-for (const p of probed) console.log(p.skip ? `  ✗ ${p.name}  跳过：${p.skip}${p.hints?.length ? '  价格提示：' + p.hints.join(' ') : ''}` : `  ✓ ${p.name}  ${p.fn} × ${p.qty}（免费上限）  ${p.verified ? '' : '[盲试]'}  ${p.probeMs}ms`);
+for (const p of probed) console.log(p.skip ? `  ✗ ${p.name}  跳过：${p.skip}${p.hints?.length ? '  价格提示：' + p.hints.join(' ') : ''}` : `  ✓ ${p.name}  ${p.fn} × ${p.qty}${p.value > 0n ? `  付 ${ethers.formatEther(p.value)} BNB` : '（免费上限）'}  ${p.verified ? '' : '[盲试]'}  ${p.probeMs}ms`);
+
+const gasPrice = (await rpc((n) => n.getFeeData()).catch(() => null))?.gasPrice || 0n;
+for (const p of probed.filter((p) => !p.skip)) {
+  p.gasBnb = ethers.formatEther((p.gas || 0n) * gasPrice * 12n / 10n);
+  if (p.value > MAX_VALUE) p.skip = `需付 ${ethers.formatEther(p.value)} BNB，超过手动单笔上限 ${ethers.formatEther(MAX_VALUE)} BNB`;
+  else if (bnb0 < p.value + (p.gas || 0n) * gasPrice * 2n) p.skip = `余额不足：需要约 ${ethers.formatEther(p.value + (p.gas || 0n) * gasPrice)} BNB，钱包只有 ${ethers.formatEther(bnb0)} BNB`;
+}
+if (QUOTE) {
+  const quoted = probed.map((p) => ({ name: p.name, contract: p.addr, method: p.fn, qty: p.qty, status: p.skip ? '跳过' : '报价', reason: p.skip, hints: p.hints, valueWei: p.value?.toString(), valueBnb: p.value != null ? ethers.formatEther(p.value) : undefined, gasBnbEst: p.gasBnb, balanceBnb: ethers.formatEther(bnb0) }));
+  if (opt('--json-out')) fs.writeFileSync(opt('--json-out'), JSON.stringify({ wallet: ME, quote: true, results: quoted }));
+  console.log('报价完成（未发交易）'); process.exit(0);
+}
 
 // 2) 并行：preview + 安全检查
 const ok = probed.filter((p) => !p.skip);
 await Promise.all(ok.map(async (p) => {
   const t = Date.now();
-  p.preview = await sh(['contract-call', 'preview', '--binanceChainId', '56', '--from', ME, '--to', p.to, '--value', '0', '--inputData', p.data, '--json']);
-  p.previewMs = Date.now() - t; p.reject = judge(p.preview);
+  p.preview = await shRetry(['contract-call', 'preview', '--binanceChainId', '56', '--from', ME, '--to', p.to, '--value', String(p.value ?? 0n), '--inputData', p.data, '--json']);
+  p.previewMs = Date.now() - t; p.reject = judge(p.preview, p.value ?? 0n);
   if (p.reject) p.skip = 'preview 不放行：' + p.reject;
 }));
 const go = ok.filter((p) => !p.skip);
@@ -174,7 +227,7 @@ if (!DRY) for (const p of go) {
 // 4) 收回执
 const results = [];
 for (const p of probed) {
-  const row = { name: p.name, contract: p.addr, method: p.fn, qty: p.qty, status: p.skip ? '跳过' : DRY ? '可mint(未执行)' : '', reason: p.skip, hints: p.hints };
+  const row = { name: p.name, contract: p.addr, method: p.fn, qty: p.qty, status: p.skip ? '跳过' : DRY ? '可mint(未执行)' : '', reason: p.skip, hints: p.hints, valueBnb: p.value > 0n ? ethers.formatEther(p.value) : undefined };
   if (!DRY && p.tx) {
     let rc = null; for (let i = 0; i < 60 && !rc; i++) { rc = await rpc((n) => n.getTransactionReceipt(p.tx)).catch(() => null); if (!rc) await new Promise((r) => setTimeout(r, 500)); }
     if (!rc) row.status = '未确认(查链上)';

@@ -4,6 +4,17 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.3.9
+**NFT**
+- Added manual mint: any project can be minted manually with a quantity you choose. Paid projects are quoted first and send a transaction only after a second confirmation (per-transaction cap 0.5 BNB by default, adjustable with `NFT_MANUAL_MAX_BNB`). Auto-mint still only handles free projects.
+- The feed now keeps only projects that require an Agent ID; unrelated projects no longer appear.
+- The auto-mint switch is now persistent: refreshing the page or restarting the service never changes it.
+- Fixed missing avatars on some projects: a temporary network failure is no longer cached as "no image" for an hour.
+- Authors can run `node scripts/setup-feed-gist.mjs` to create the public feed in one step.
+
+**Docs**
+- README rewritten in Chinese and English: separate macOS / Windows / Linux install and start steps, manual mint and feed documentation added, demo screenshot removed.
+
 ## 0.3.8
 **NFT**
 - New-project data is now pushed by the author and pulled automatically every minute — **no Telegram setup needed**. When the author isn't watching, the page shows "feed stopped".

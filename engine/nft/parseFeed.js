@@ -53,3 +53,8 @@ export function parseNftPost(text) {
 export function autoEligible(p) {
   return !!p && p.freeOnAgentPath && !p.manualOnly;
 }
+
+// 监听只保留 Agent ID 限定的项目（NFT_FEED_AGENT_ONLY=0 可关闭）：其他项目不写进 feed，也就不会出现在列表和浮窗里
+export function feedWorthy(p, agentOnly = true) {
+  return !!p && (!agentOnly || p.agentGated === true);
+}

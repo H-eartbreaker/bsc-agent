@@ -9,7 +9,8 @@ const isNftRoute = () => /^#\/?nft(?:$|\/)/.test(location.hash);
 function setVisible(on) {
   R.active = on;
   $('#nft')?.classList.toggle('hidden', !on);
-  for (const id of ['.layout', '#pulse', '#hold', '#track', '#snipe']) document.querySelector(id)?.classList.toggle('hidden', on);
+  // 只在进入 NFT 页时把别的页面藏起来；离开时由 app.js 的 setView 决定显示哪个（之前这里会把所有页面一起显示出来，把底栏顶没了）
+  if (on) for (const id of ['.layout', '#pulse', '#hold', '#track', '#snipe']) document.querySelector(id)?.classList.add('hidden');
   viewButtons().forEach((b) => b.classList.toggle('active', on ? b.dataset.view === 'nft' : b.dataset.view !== 'nft' && b.classList.contains('active')));
   if (on || R.floatOpen) { load(); clearInterval(R.timer); R.timer = setInterval(load, 15000); }
   else clearInterval(R.timer);
@@ -29,12 +30,19 @@ function toggleFloat(force) {
   button?.classList.toggle('active', R.floatOpen);
   button?.setAttribute('aria-expanded', String(R.floatOpen));
   if (button) button.title = R.floatOpen ? '关闭新项目浮窗' : '打开新项目浮窗';
+  syncDock();
   if (R.floatOpen) { load(); render(); }
+}
+
+function syncDock() {
+  const h = document.documentElement.classList;
+  h.toggle('nft-docked-right', R.floatOpen && R.floatSide !== 'left');
+  h.toggle('nft-docked-left', R.floatOpen && R.floatSide === 'left');
 }
 
 function setFloatSide(side) {
   R.floatSide = side === 'left' ? 'left' : 'right'; localStorage.setItem('bscagent.nftFloatSide', R.floatSide);
-  const panel = ensureFloatPanel(); panel.classList.toggle('left', R.floatSide === 'left'); panel.classList.toggle('right', R.floatSide === 'right');
+  const panel = ensureFloatPanel(); panel.classList.toggle('left', R.floatSide === 'left'); panel.classList.toggle('right', R.floatSide === 'right'); syncDock();
 }
 
 const HDR = { 'sec-fetch-site': 'same-origin' };
@@ -50,11 +58,20 @@ async function saveAuto(body) {
     if (!r.ok) throw new Error(j.error || `保存失败 (${r.status})`);
     R.auto = { ...R.auto, ...j }; syncTaskState();
   } catch (e) { R.msg = e.message; }
-  await loadAuto(); await loadHistory(); render();
+  await loadAuto(); await loadHistory(); await loadMinted(); render();
 }
 async function loadHistory() {
   const since = R.historyScope === 'session' && R.auto?.sessionStart ? `&since=${R.auto.sessionStart}` : '';
   try { const r = await fetch(`/api/nft/mint-history?limit=300${since}`, { headers: HDR }); if (r.ok) { const h = await r.json(); R.history = Array.isArray(h.rows) ? h.rows : []; R.summary = h.summary || null; } } catch { /* 保留旧数据 */ }
+}
+
+async function loadMinted() {
+  try {
+    const r = await fetch('/api/nft/mint-history?limit=500', { headers: HDR }); if (!r.ok) return;
+    const m = {};
+    for (const x of (await r.json()).rows || []) if (x.status === '成功' && !x.dry && x.contract) { const k = x.contract.toLowerCase(); m[k] = (m[k] || 0) + (x.tokenIds?.length || x.qty || 1); }
+    R.minted = m;
+  } catch { /* 保留旧数据 */ }
 }
 
 async function load() {
@@ -63,7 +80,7 @@ async function load() {
     const feed = await fetch('/api/nft/feed?limit=200', { headers: HDR });
     if (!feed.ok) throw new Error('NFT feed unavailable');
     const j = await feed.json(); R.rows = Array.isArray(j.rows) ? j.rows : [];
-    await loadAuto(); await loadHistory();
+    await loadAuto(); await loadHistory(); await loadMinted();
     render();
   } catch (e) {
     const grid = $('#nftProjectGrid'); if (grid) grid.innerHTML = `<div class="empty">NFT 监听暂不可用：${esc(e.message)}</div>`;
@@ -85,7 +102,8 @@ function filtered() {
 }
 
 function badge(p) {
-  const out = [];
+  const out = [], n = R.minted?.[String(p.contract || '').toLowerCase()];
+  if (n) out.push(`<i class="nft-badge done" title="你已经 mint 过这个项目，共 ${n} 枚">✓ 已 mint ${n}</i>`);
   if (p.eligible) out.push('<i class="nft-badge good" title="符合当前自动 mint 规则">符合规则</i>');
   else if (p.free) out.push('<i class="nft-badge">免费</i>');
   else out.push('<i class="nft-badge warn">付费手动</i>');
@@ -95,17 +113,22 @@ function badge(p) {
   return out.join('');
 }
 
+function art(p, cls = '') {
+  const initial = esc((p.symbol || p.name || 'N').slice(0, 2).toUpperCase());
+  return `<span class="nft-project-art ${cls}"><img src="/api/nft/art/${esc(p.contract)}" alt="" loading="lazy">${initial}</span>`;
+}
+
 function card(p) {
   const initial = esc((p.symbol || p.name || 'N').slice(0, 2).toUpperCase());
   const progress = p.total && p.minted != null ? Math.min(100, p.minted / p.total * 100) : 0;
   return `<button class="nft-project-card ${p.contract === R.selected ? 'selected' : ''}" data-nft-select="${esc(p.contract)}">
-    <span class="nft-project-art">${initial}</span><span class="nft-project-body"><span class="nft-project-title"><b>${esc(p.name)}</b><small>${esc(p.symbol)}</small></span><span class="nft-project-badges">${badge(p)}</span><span class="nft-project-price">${esc(p.priceLine || (p.free ? 'mint 免费（仅付 gas）' : '价格待核对'))}</span><span class="nft-project-meta">${p.minted != null ? `已 mint ${p.minted}${p.total != null ? ` / ${p.total}` : ''}` : 'mint 数量未知'}<span>${p.postedAt ? new Date(p.postedAt).toLocaleString('zh-CN', { hour12: false }) : '时间未知'}</span></span><span class="nft-progress"><i style="width:${progress}%"></i></span></span>
+    ${art(p)}<span class="nft-project-body"><span class="nft-project-title"><b>${esc(p.name)}</b><small>${esc(p.symbol)}</small></span><span class="nft-project-badges">${badge(p)}</span><span class="nft-project-price">${esc(p.priceLine || (p.free ? 'mint 免费（仅付 gas）' : '价格待核对'))}</span><span class="nft-project-meta">${p.minted != null ? `已 mint ${p.minted}${p.total != null ? ` / ${p.total}` : ''}` : 'mint 数量未知'}<span>${p.postedAt ? new Date(p.postedAt).toLocaleString('zh-CN', { hour12: false }) : '时间未知'}</span></span><span class="nft-progress"><i style="width:${progress}%"></i></span></span>
   </button>`;
 }
 
 function newProjectItem(p) {
   const initial = esc((p.symbol || p.name || 'N').slice(0, 2).toUpperCase());
-  return `<button class="nft-new-item" data-nft-select="${esc(p.contract)}"><span class="nft-project-art small">${initial}</span><span class="nft-new-copy"><span class="nft-new-title"><b>${esc(p.name)}</b>${p.symbol ? `<small>${esc(p.symbol)}</small>` : ''}<time>${p.postedAt ? new Date(p.postedAt).toLocaleString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }) : '—'}</time></span><span class="nft-project-badges">${badge(p)}</span><span class="nft-new-desc">${esc(p.priceLine || (p.free ? 'mint 免费（仅付 gas）' : '价格待核对'))}</span><span class="nft-new-desc">${p.minted != null ? `已 mint ${p.minted}${p.total != null ? ` / ${p.total}` : ''}` : 'mint 数量未知'}${p.perWallet ? ` · 每钱包 ${p.perWallet}` : ''}</span></span></button>`;
+  return `<button class="nft-new-item" data-nft-select="${esc(p.contract)}">${art(p, 'small')}<span class="nft-new-copy"><span class="nft-new-title"><b>${esc(p.name)}</b>${p.symbol ? `<small>${esc(p.symbol)}</small>` : ''}<time>${p.postedAt ? new Date(p.postedAt).toLocaleString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }) : '—'}</time></span><span class="nft-project-badges">${badge(p)}</span><span class="nft-new-desc">${esc(p.priceLine || (p.free ? 'mint 免费（仅付 gas）' : '价格待核对'))}</span><span class="nft-new-desc">${p.minted != null ? `已 mint ${p.minted}${p.total != null ? ` / ${p.total}` : ''}` : 'mint 数量未知'}${p.perWallet ? ` · 每钱包 ${p.perWallet}` : ''}</span></span></button>`;
 }
 
 function newProjectPanel(rows) {
@@ -133,17 +156,15 @@ function manager() {
   const opt = (v, cur, label) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${label}</option>`;
   const s = R.summary || { projectsOk: 0, nftsMinted: 0, failed: 0, gasBnb: 0 };
   const last = au.lastRun;
-  const lockWarn = !au.canExecute ? '<p class="nft-muted">当前是演示/只读模式（LIVE_TRADE 未开），只能试运行。</p>' : '';
+  const lockWarn = !au.canExecute ? '<p class="nft-muted">当前是演示/只读模式（LIVE_TRADE 未开），不能真实 mint。</p>' : '';
   return `<div class="nft-manager-head"><div><h2>自动 mint 管理</h2><p>只处理「免费 + Agent ID」项目，付费项目永远手动。每个项目先链上模拟、再 baw 预览，通过才发交易，花费只有 gas。</p></div><span class="nft-preview-lock ${on && !dry ? 'live' : ''}">${mode}</span></div>
     ${R.msg ? `<p class="nft-muted bad">${esc(R.msg)}</p>` : ''}
     <div class="nft-manager-grid"><section class="nft-settings-card"><h3>自动规则</h3>
       <label class="nft-setting-row"><span>开启 NFT 自动 mint 任务</span><input type="checkbox" data-nft-enable ${on ? 'checked' : ''}></label>
-      <label class="nft-setting-row"><span>试运行（只检查，不发交易）</span><input type="checkbox" data-nft-rule="dry" ${dry ? 'checked' : ''}></label>
       <label class="nft-setting-row"><span>必须有 Agent ID</span><input type="checkbox" data-nft-rule="agentOnly" ${rules.agentOnly ? 'checked' : ''}></label>
       <label class="nft-setting-row"><span>官网 / X 条件</span><select data-nft-rule="social">${Object.entries(SOCIAL_LABEL).map(([k, v]) => opt(k, rules.social, v)).join('')}</select></label>
       <label class="nft-setting-row"><span>每钱包数量</span><select data-nft-rule="quantity">${opt('all', rules.quantity, '按项目上限')}${opt('one', rules.quantity, '每项目 1 个')}</select></label>
       <label class="nft-setting-row"><span>上限未知时最多试</span><input type="number" min="1" max="50" data-nft-rule="maxQty" value="${rules.maxQty}" style="width:70px"></label>
-      <label class="nft-setting-row"><span>处理范围</span><select data-nft-rule="scope">${opt('new', rules.scope, '只处理开启后的新项目')}${opt('all', rules.scope, '也处理监听里已有的')}</select></label>
       <label class="nft-setting-row"><span>排除关键词</span><input type="text" data-nft-rule="exclude" value="${esc(rules.exclude.join(', '))}" placeholder="逗号分隔，如 test, scam" style="width:200px"></label>
       <p class="nft-muted">${watcherTxt}。每 10 秒检查一次新项目；失败按 2 分钟 / 10 分钟 / 30 分钟 / 2 小时间隔重试；已广播的交易不会重发。重启服务后任务不会自动恢复，需要你重新开启。</p>${lockWarn}
     </section><section class="nft-settings-card"><h3>当前任务</h3>
@@ -154,19 +175,60 @@ function manager() {
 }
 
 function historyMarkup() {
-  const au = R.auto, start = au?.sessionStart || 0, rows = R.history, s = R.summary || { projectsOk: 0, nftsMinted: 0, failed: 0, gasBnb: 0 };
+  const au = R.auto, start = au?.sessionStart || 0, all = R.history, s = R.summary || { projectsOk: 0, nftsMinted: 0, failed: 0, gasBnb: 0 };
+  const skipped = all.filter((x) => x.status === '跳过').length, rows = R.showSkip ? all : all.filter((x) => x.status !== '跳过');
   const where = R.historyScope === 'session' ? (start ? `当前任务：${fmtT(start)} 起` : '还没有开启过任务') : '全部历史（含手动 mint）';
-  return `<div class="nft-manager-head"><div><h2>mint 历史</h2><p>${where} · 成功 ${s.projectsOk} 个项目 / ${s.nftsMinted} 枚 NFT · 失败 ${s.failed} · gas ${s.gasBnb} BNB</p></div><div class="nft-history-tools"><button class="nft-history-scope ${R.historyScope === 'session' ? 'active' : ''}" data-nft-history-scope="session">当前任务</button><button class="nft-history-scope ${R.historyScope === 'all' ? 'active' : ''}" data-nft-history-scope="all">全部历史</button><span class="nft-muted">${rows.length} 条</span></div></div><div class="nft-history-table"><div class="nft-history-row nft-history-head"><span>时间</span><span>项目 / 合约</span><span>数量</span><span>结果</span><span>原因 / 交易 / tokenId</span></div>${rows.map((x) => `<div class="nft-history-row"><span>${x.at ? fmtT(x.at) : esc(x.time || '—')}<small>${x.dry ? '试运行' : x.source === 'auto' ? '自动' : '手动'}</small></span><span><b>${esc(x.name || 'NFT')}</b><small class="mono">${esc(x.contract || '—')}</small></span><span>${x.tokenIds?.length || x.qty || '—'}</span><span class="${x.status === '成功' ? 'good' : x.dry ? '' : 'bad'}">${esc(x.status || '—')}</span><span class="nft-history-reason">${esc(x.reason || '')} ${txLink(x.tx)} ${x.tokenIds?.length ? `<small>#${esc(x.tokenIds.slice(0, 6).join(', #'))}${x.tokenIds.length > 6 ? '…' : ''}</small>` : ''}</span></div>`).join('') || '<div class="empty">这段时间还没有记录。</div>'}</div>`;
+  const short = (a) => a ? a.slice(0, 6) + '…' + a.slice(-4) : '—';
+  const why = (x) => { const t = String(x.reason || '').split('；')[0]; return t.length > 46 ? t.slice(0, 46) + '…' : t; };
+  const row = (x) => `<div class="nft-history-row"><span>${x.at ? fmtT(x.at) : esc(x.time || '—')}<small>${x.dry ? '试运行' : x.source === 'auto' ? '自动' : '手动'}</small></span><span><b>${esc(x.name || 'NFT')}</b><small class="mono" title="${esc(x.contract || '')}">${esc(short(x.contract))}</small></span><span>${x.tokenIds?.length || x.qty || '—'}</span><span class="${x.status === '成功' ? 'good' : x.dry || x.status === '跳过' ? '' : 'bad'}">${esc(x.status || '—')}</span><span class="nft-history-reason" title="${esc(x.reason || '')}">${esc(why(x))} ${txLink(x.tx)} ${x.tokenIds?.length ? `<small>#${esc(x.tokenIds.slice(0, 6).join(', #'))}${x.tokenIds.length > 6 ? '…' : ''}</small>` : ''}</span></div>`;
+  return `<div class="nft-manager-head"><div><h2>mint 历史</h2><p>${where} · 成功 ${s.projectsOk} 个项目 / ${s.nftsMinted} 枚 NFT · 失败 ${s.failed} · gas ${s.gasBnb} BNB${s.paidBnb ? ` · 付费 ${s.paidBnb} BNB` : ''}</p></div><div class="nft-history-tools"><button class="nft-history-scope ${R.historyScope === 'session' ? 'active' : ''}" data-nft-history-scope="session">当前任务</button><button class="nft-history-scope ${R.historyScope === 'all' ? 'active' : ''}" data-nft-history-scope="all">全部历史</button>${skipped ? `<button class="nft-history-scope ${R.showSkip ? 'active' : ''}" data-nft-skip>${R.showSkip ? '隐藏' : '显示'}跳过 ${skipped}</button>` : ''}<span class="nft-muted">${rows.length} 条</span></div></div><div class="nft-history-table"><div class="nft-history-row nft-history-head"><span>时间</span><span>项目 / 合约</span><span>数量</span><span>结果</span><span>原因 / 交易 / tokenId</span></div>${rows.map(row).join('') || '<div class="empty">这段时间还没有成功或失败的记录。</div>'}</div>`;
+}
+
+function manualMintMarkup(p) {
+  const m = R.mintState?.[p.contract] || {};
+  const qty = R.mintQty || 2;
+  return `<div class="nft-manual-mint"><div class="nft-manual-row"><button class="nft-action primary" data-nft-mint="1" ${m.busy ? 'disabled' : ''}>手动 mint 1 个</button><span class="nft-manual-or">或</span><input class="nft-manual-qty" data-nft-mint-qty type="number" min="1" max="50" step="1" value="${qty}" aria-label="自定义 mint 数量"><button class="nft-action" data-nft-mint="custom" ${m.busy ? 'disabled' : ''}>mint 指定数量</button></div><p class="nft-muted nft-manual-msg ${m.err ? 'bad' : ''}">${m.busy ? (m.busy === 'quote' ? '正在报价（链上模拟）…' : '正在模拟、预览、发交易，通常十几秒…') : esc(m.msg || (p.free ? '先链上模拟、baw 预览通过才发交易，只花 gas。' : '付费项目：点了会先报价，弹出费用让你二次确认后才发交易。'))}</p></div>`;
+}
+
+const postJson = async (url, body) => {
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...HDR }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `失败 (${r.status})`);
+  return j;
+};
+
+async function manualMint(contract, qty) {
+  R.mintState = R.mintState || {};
+  const p = R.rows.find((x) => x.contract === contract);
+  let extra = {};
+  try {
+    if (p && !p.free) {
+      R.mintState[contract] = { busy: 'quote' }; render();
+      const { quote: q } = (await postJson('/api/nft/mint/quote', { contract, qty }));
+      const total = (Number(q.valueBnb) + Number(q.gasBnb || 0)).toFixed(6);
+      const ok = confirm(`确认 mint「${p.name}」？\n\n数量：${q.qty} 个\nmint 费用：${q.valueBnb} BNB${q.free ? '（免费）' : ''}\n预计 gas：约 ${q.gasBnb} BNB\n合计约：${total} BNB\n钱包余额：${Number(q.balanceBnb).toFixed(4)} BNB\n\n点「确定」后会真实扣费并发交易，付出的钱不会退回。`);
+      if (!ok) { R.mintState[contract] = { msg: '已取消，没有发交易。' }; render(); return; }
+      extra = { confirmed: true, valueWei: q.valueWei };
+    }
+    R.mintState[contract] = { busy: true }; render();
+    const j = await postJson('/api/nft/mint', { contract, qty, ...extra });
+    const x = j.result || {};
+    const ok = x.status === '成功';
+    R.mintState[contract] = ok
+      ? { msg: `已 mint ${x.tokenIds?.length || x.qty || qty} 个${x.valueBnb ? ' · 付 ' + x.valueBnb + ' BNB' : ''}${x.tx ? ' · tx ' + String(x.tx).slice(0, 10) + '…' : ''}${x.gasBnb ? ' · gas ' + x.gasBnb + ' BNB' : ''}` }
+      : { err: true, msg: `${x.status || '没成功'}：${String(x.reason || '').split('；')[0].slice(0, 120)}` };
+  } catch (e) { R.mintState[contract] = { err: true, msg: e.message }; }
+  await loadHistory(); await loadMinted(); render();
 }
 
 function detail(p) {
   if (!p) return '<div class="empty">选择一个项目查看详情</div>';
   const max = p.perWallet || null;
-  return `<div class="nft-detail-back"><button data-nft-back>‹ 新项目</button><span class="nft-muted">项目详情</span></div><div class="nft-detail-head"><div class="nft-project-art large">${esc((p.symbol || p.name || 'N').slice(0, 2).toUpperCase())}</div><div><h2>${esc(p.name)} <small>${esc(p.symbol)}</small></h2><div class="nft-project-badges">${badge(p)}</div></div></div>
+  return `<div class="nft-detail-back"><button data-nft-back>‹ 新项目</button><span class="nft-muted">项目详情</span></div><div class="nft-detail-head">${art(p, 'large')}<div><h2>${esc(p.name)} <small>${esc(p.symbol)}</small></h2><div class="nft-project-badges">${badge(p)}</div></div></div>
     <div class="nft-detail-kv"><span>合约</span><b class="mono">${esc(p.contract)}</b><button class="nft-copy" data-nft-copy="${esc(p.contract)}">复制</button></div>
     <div class="nft-detail-stats"><div><span>价格</span><b>${esc(p.priceLine || (p.free ? '免费 + gas' : '待核对'))}</b></div><div><span>已 mint</span><b>${p.minted ?? '—'}${p.total != null ? ` / ${p.total}` : ''}</b></div><div><span>每钱包上限</span><b>${max ?? '未知'}</b></div></div>
-    <div class="nft-rule-box"><b>规则判断</b><p>${p.eligible ? '免费 + Agent ID，符合当前规则，仍需预览。' : p.free ? '免费但未满足当前规则，保留手动预览。' : '付费项目只展示，不自动 mint。'}</p>${p.paidHints?.length ? `<p class="nft-muted">${esc(p.paidHints.join('；'))}</p>` : ''}</div>
-    <div class="nft-mint-box"><div class="nft-mint-head"><b>Mint 方式</b></div><p class="nft-muted">${p.eligible ? '开启「自动 mint 任务」后会自动处理这个项目（先模拟、再预览、通过才发交易）。' : p.free ? '免费但不满足自动规则，可手动处理：' : '付费项目不会自动 mint，请自己判断后在官网操作。'}</p>${p.free ? `<div class="nft-detail-kv"><span>手动试运行</span><b class="mono">node scripts/free-mint.mjs --dry ${esc(p.contract)}</b><button class="nft-copy" data-nft-copy="node scripts/free-mint.mjs --dry ${esc(p.contract)}">复制</button></div>` : ''}</div>
+    <div class="nft-rule-box"><b>规则判断</b><p>${p.eligible ? '免费 + Agent ID，符合当前规则，仍需预览。' : p.free ? '免费但未满足当前规则，保留手动预览。' : '付费项目不自动 mint，可手动 mint（会先报价并二次确认）。'}</p>${p.paidHints?.length ? `<p class="nft-muted">${esc(p.paidHints.join('；'))}</p>` : ''}</div>
+    <div class="nft-mint-box"><div class="nft-mint-head"><b>Mint 方式</b></div><p class="nft-muted">${p.eligible ? '开启「自动 mint 任务」后会自动处理这个项目（先模拟、再预览、通过才发交易）。' : p.free ? '免费但不满足自动规则，可手动处理：' : '付费项目不会自动 mint，只能手动：点下面按钮会先报价，确认费用后才发交易。'}</p>${manualMintMarkup(p)}${p.free ? `<div class="nft-detail-kv"><span>手动试运行</span><b class="mono">node scripts/free-mint.mjs --dry ${esc(p.contract)}</b><button class="nft-copy" data-nft-copy="node scripts/free-mint.mjs --dry ${esc(p.contract)}">复制</button></div>` : ''}</div>
     `;
 }
 
@@ -187,6 +249,8 @@ function render() {
   const float = ensureFloatPanel(); setFloatSide(R.floatSide); if (R.floatOpen) float.innerHTML = selected ? detail(selected) : newProjectPanel(rows);
 }
 
+// 图片加载失败就拿掉 <img>，露出底下的字母（页面 CSP 不允许行内 onerror，所以用捕获监听）
+document.addEventListener('error', (e) => { const i = e.target; if (i?.tagName === 'IMG' && i.closest?.('.nft-project-art')) i.remove(); }, true);
 document.addEventListener('click', async (e) => {
   const status = e.target.closest('[data-task-status]');
   if (status) { e.preventDefault(); const target = document.querySelector(`#viewSw button[data-view="${status.dataset.taskStatus}"]`); target?.click(); if (status.dataset.taskStatus === 'nft') { R.mode = 'manage'; $$('[data-nft-mode]').forEach((b) => b.classList.toggle('active', b.dataset.nftMode === R.mode)); load(); } return; }
@@ -201,10 +265,18 @@ document.addEventListener('click', async (e) => {
   if (filter && R.active) { R.filter = filter.dataset.nftFilter; $$('[data-nft-filter]').forEach((b) => b.classList.toggle('active', b === filter)); render(); return; }
   const mode = e.target.closest('[data-nft-mode]');
   if (mode && R.active) { R.mode = mode.dataset.nftMode; $$('[data-nft-mode]').forEach((b) => b.classList.toggle('active', b.dataset.nftMode === R.mode)); render(); return; }
+  if (e.target.closest('[data-nft-skip]') && R.active) { R.showSkip = !R.showSkip; render(); return; }
   const scope = e.target.closest('[data-nft-history-scope]'); if (scope && R.active) { R.historyScope = scope.dataset.nftHistoryScope; loadHistory().then(render); return; }
+  const mint = e.target.closest('[data-nft-mint]');
+  if (mint && R.selected) {
+    const q = mint.dataset.nftMint === '1' ? 1 : Math.floor(Number(document.querySelector('[data-nft-mint-qty]')?.value));
+    if (!Number.isInteger(q) || q < 1 || q > 50) { R.mintState = { ...R.mintState, [R.selected]: { err: true, msg: '数量要是 1~50 的整数' } }; render(); return; }
+    manualMint(R.selected, q); return;
+  }
   const copy = e.target.closest('[data-nft-copy]');
   if (copy) { try { await navigator.clipboard.writeText(copy.dataset.nftCopy); copy.textContent = '已复制'; } catch { copy.textContent = '复制失败'; } setTimeout(() => { copy.textContent = '复制'; }, 1200); }
 }, true);
+document.addEventListener('input', (e) => { const q = e.target.closest?.('[data-nft-mint-qty]'); if (q) R.mintQty = Number(q.value) || 2; });
 $('#nftRefresh')?.addEventListener('click', () => load());
 $('#nftSort')?.addEventListener('change', (e) => { R.sort = e.target.value; render(); });
 $('#nftRequireSocial')?.addEventListener('change', (e) => { R.social = e.target.checked; render(); });
@@ -217,10 +289,10 @@ document.addEventListener('change', (e) => {
   }
   const rule = e.target.closest('[data-nft-rule]'); if (!rule) return;
   const key = rule.dataset.nftRule, val = rule.type === 'checkbox' ? rule.checked : rule.type === 'number' ? Number(rule.value) : rule.value;
-  if (key === 'dry' && val === false && R.auto?.enabled && !confirm('关闭试运行后，符合规则的项目会被真实 mint。确定？')) { rule.checked = true; return; }
   saveAuto({ rules: { [key]: key === 'exclude' ? val.split(/[,，\s]+/).filter(Boolean) : val } });
 }, true);
 window.addEventListener('hashchange', () => setVisible(isNftRoute()));
+window.addEventListener('bsc:leave-nft', () => { if (R.active) setVisible(false); });
 ensureFloatPanel();
 setVisible(isNftRoute());
 loadAuto();

@@ -25,3 +25,11 @@ test('NFT feed API reader filters candidates and sanitizes rows', async () => {
 test('missing NFT feed is an empty read-only result', () => {
   assert.deepEqual(nftFeedList('/tmp/does-not-exist-nft-feed.json'), []);
 });
+
+import { feedWorthy } from '../engine/nft/parseFeed.js';
+test('只保留 Agent ID 限定的项目，可用开关关闭', () => {
+  assert.equal(feedWorthy({ agentGated: true }), true);
+  assert.equal(feedWorthy({ agentGated: false }), false);
+  assert.equal(feedWorthy(null), false);
+  assert.equal(feedWorthy({ agentGated: false }, false), true);
+});

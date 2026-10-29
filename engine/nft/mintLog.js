@@ -22,7 +22,7 @@ export function readMintHistory(dir, { limit = 300, since = 0, includeDry = true
         name: str(r.name || 'NFT', 120), contract: str(r.contract, 42), method: str(r.method, 80),
         qty: Number.isFinite(r.qty) ? r.qty : null, status: str(r.status, 30), reason: str(r.reason, 240), tx: str(r.tx, 70),
         tokenIds: Array.isArray(r.tokenIds) ? r.tokenIds.slice(0, 50).map((x) => str(x, 40)) : [],
-        gasBnb: r.gasBnb ? str(r.gasBnb, 24) : '', dry: log.dry === true, source: log.source === 'auto' ? 'auto' : 'manual',
+        gasBnb: r.gasBnb ? str(r.gasBnb, 24) : '', valueBnb: r.valueBnb ? str(r.valueBnb, 24) : '', dry: log.dry === true, source: log.source === 'auto' ? 'auto' : 'manual',
       });
     }
   }
@@ -38,5 +38,6 @@ export function summarize(rows) {
     failed: real.filter((r) => r.status === '失败' || r.status === '未确认(查链上)').length,
     skipped: real.filter((r) => r.status === '跳过').length,
     gasBnb: Number(ok.reduce((n, r) => n + (Number(r.gasBnb) || 0), 0).toFixed(6)),
+    paidBnb: Number(ok.reduce((n, r) => n + (Number(r.valueBnb) || 0), 0).toFixed(6)),
   };
 }

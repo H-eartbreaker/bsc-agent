@@ -27,9 +27,9 @@ export function cleanRules(input = {}) {
     social: SOCIAL.has(r.social) ? r.social : 'any',
     quantity: r.quantity === 'one' ? 'one' : 'all',
     maxQty: Math.max(1, Math.min(50, Math.floor(Number(r.maxQty) || DEFAULT_RULES.maxQty))),
-    scope: r.scope === 'all' ? 'all' : 'new',
+    scope: 'new',   // 固定只处理开启之后出现的新项目
     exclude: (Array.isArray(r.exclude) ? r.exclude : String(r.exclude || '').split(/[,，\s]+/)).map((x) => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 30),
-    dry: r.dry === true,
+    dry: false,   // 不再提供试运行：开启就是真实 mint（仍然先模拟、预览，通过才发交易）
   };
 }
 
@@ -72,8 +72,7 @@ export class AutoMint {
     this.busy = false; this.timer = null; this.lastRun = null;
     this.state = { enabled: false, enabledAt: 0, sessionStart: 0, rules: cleanRules(), attempts: {} };
     try { const s = JSON.parse(readFileSync(stateFile, 'utf8')); this.state = { ...this.state, ...s, rules: cleanRules(s.rules), attempts: s.attempts && typeof s.attempts === 'object' ? s.attempts : {} }; } catch { /* 第一次用 */ }
-    // 重启后不自动恢复运行：真实花 gas 的任务必须由人重新点开
-    if (this.state.enabled) { this.state.enabled = false; this.save(); }
+    // 开关只由人手动开/关；刷新页面、重启服务都不改它（开启时间和已处理记录一起保留，所以不会重复 mint 老项目）
   }
 
   save() {
@@ -88,7 +87,7 @@ export class AutoMint {
   configure({ enabled, rules } = {}) {
     if (rules) {
       const next = cleanRules({ ...this.state.rules, ...rules });
-      if (next.dry !== this.state.rules.dry) this.state.attempts = {};   // 试运行 ↔ 真实切换：之前的「已处理」不能挡住真实 mint
+      if (next.dry !== this.state.rules.dry) this.state.attempts = Object.fromEntries(Object.entries(this.state.attempts).filter(([, a]) => a.tx));   // 试运行 ↔ 真实切换：试运行的「已处理」不能挡住真实 mint，但已广播过的真实交易要保留，避免重复 mint
       this.state.rules = next;
     }
     if (typeof enabled === 'boolean' && enabled !== this.state.enabled) {
@@ -137,18 +136,20 @@ export class AutoMint {
 
 // 默认执行器：起 free-mint.mjs 子进程，结果从它写出的 JSON 读回
 export function scriptRunner({ script, cwd, env = process.env, timeoutMs = 6 * 60_000 }) {
-  return (rows, { dry, maxQty }) => new Promise((resolve, reject) => {
+  return (rows, { dry, maxQty, qty, quote, unitWei, valueWei }) => new Promise((resolve, reject) => {
     const tmp = join(tmpdir(), `nft-auto-${process.pid}-${Date.now()}`);
     mkdirSync(tmp, { recursive: true });
     const list = join(tmp, 'targets.txt'), out = join(tmp, 'result.json');
     writeFileSync(list, rows.map((r) => `${String(r.name).replace(/[\r\n=]/g, ' ')} ${r.contract}`).join('\n'));
-    const args = [script, '--file', list, '--max', String(maxQty), '--json-out', out, ...(dry ? ['--dry'] : [])];
+    const args = [script, '--file', list, '--max', String(maxQty || 10), ...(qty ? ['--qty', String(qty)] : []), '--json-out', out, ...(dry ? ['--dry'] : []), ...(quote ? ['--quote'] : []), ...(unitWei ? ['--unit-wei', String(unitWei)] : []), ...(valueWei ? ['--value-wei', String(valueWei)] : [])];
     execFile(process.execPath, args, { cwd, env: typeof env === 'function' ? env() : env, timeout: timeoutMs, maxBuffer: 8 << 20 }, (err, stdout, stderr) => {
       let results = null;
       try { results = JSON.parse(readFileSync(out, 'utf8')).results; } catch { /* 下面报错 */ }
       rmSync(tmp, { recursive: true, force: true });
       if (results) return resolve(results);
-      reject(new Error((String(stderr || stdout || err?.message || '').trim().split('\n').pop() || 'free-mint 没有产出结果').slice(0, 240)));
+      const lines = String(stderr || stdout || err?.message || '').trim().split('\n').map((l) => l.trim()).filter(Boolean);
+      const msg = lines.find((l) => /^(\w*Error|ReferenceError|TypeError)\b/.test(l)) || lines.filter((l) => !/^Node\.js v/.test(l)).pop() || 'free-mint 没有产出结果';
+      reject(new Error(msg.slice(0, 240)));
     });
   });
 }

@@ -4,7 +4,7 @@ import { renameSync, writeFileSync } from 'node:fs';
 import { pfetch } from '../netProxy.js';
 import { cleanRow } from './feedApi.js';
 
-export const DEFAULT_FEED_URL = '';
+export const DEFAULT_FEED_URL = 'https://gist.githubusercontent.com/H-eartbreaker/30125fbc8f78a4c8a71fcaa3e6d14bdb/raw/nft-feed.json';
 export const FEED_STALE_MS = 30 * 60_000;
 
 export class FeedSync {

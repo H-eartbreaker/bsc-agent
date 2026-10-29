@@ -8,7 +8,7 @@
 <link rel="icon" type="image/png" sizes="96x96" href="logo-96.png?v=gold-b-1" />
 <link rel="apple-touch-icon" href="logo.png?v=gold-b-1" />
 <link rel="stylesheet" href="style.css?v=bsc-agent-copy-34" />
-<link rel="stylesheet" href="agent.css?v=25" />
+<link rel="stylesheet" href="agent.css?v=31" />
 <link rel="stylesheet" href="tracking-panel.css?v=4" />
 <link rel="stylesheet" href="version.css?v=1" />
 </head>
@@ -28,7 +28,6 @@
   </label>
   <div class="header-wallet">
   <div class="authpill hidden" id="authPill"><i></i><span></span></div>
-  <button class="pill nft-float-toggle" id="nftFloatToggle" type="button" title="打开最新 NFT 浮窗" aria-expanded="false">✦ 最新NFT</button>
   <button class="pill fav-tg" id="favToggle" title="收藏栏（显示 / 隐藏）" aria-label="显示或隐藏收藏栏"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z"/></svg></button>
 
   <button class="pill pause-all hidden" id="pauseAll" type="button"></button>
@@ -43,6 +42,7 @@
 <div class="favbar" id="favBar"><div class="fav-groups" id="favGroups"></div><div class="fav-strip" id="favStrip"></div></div>
 
 <main class="layout">
+  <nav class="trade-tabs" id="tradeTabs" aria-label="行情分栏"><button data-tv="list">新币</button><button data-tv="chart">K线</button><button data-tv="trade">交易</button></nav>
   <div class="splitter" id="splitter" title="拖动调整左栏宽度，双击恢复默认"></div>
   <!-- 左：新币流 -->
   <aside class="panel left">
@@ -199,6 +199,7 @@
 </section>
 <section class="pulse trench hidden" id="pulse">
   <div class="pulse-tools"><b>战壕</b><span class="muted">实时新币 / 打满 / 已开盘</span></div>
+  <nav class="pulse-tabs" id="pulseTabs" aria-label="战壕分栏"><button data-pt="new">新创建</button><button data-pt="soon">即将打满</button><button data-pt="dex">已开盘</button></nav>
   <div class="tcol" id="tc-new"><div class="tchw" id="tch-new"></div><div class="tc-pop-w hidden" id="tcf-new"></div><div class="tcb" id="tcb-new"></div></div>
   <div class="tcol" id="tc-soon"><div class="tchw" id="tch-soon"></div><div class="tc-pop-w hidden" id="tcf-soon"></div><div class="tcb" id="tcb-soon"></div></div>
   <div class="tcol" id="tc-dex"><div class="tchw" id="tch-dex"></div><div class="tc-pop-w hidden" id="tcf-dex"></div><div class="tcb" id="tcb-dex"></div></div>
@@ -233,7 +234,7 @@
   </section>
 </section>
 
-<footer class="statusbar"><a href="#" class="pill" id="selfCheckBtn" title="检查哪里没配好">🩺 自检</a><span class="chain-status"><i class="dot g"></i>BSC 主网</span>  <div class="pill"><i class="dot y"></i><span class="muted">WSS</span><b id="wssName">…</b><span class="g mono" id="wssMs"></span></div>  <div class="pill"><i class="dot g"></i><span class="muted">RPC</span><b id="rpcName">…</b><span class="g mono" id="rpcMs"></span></div>  <div class="pill mono muted" id="blockNo">#—</div>  <div class="pill mono muted" id="bnbPx">BNB —</div>  <div class="pill" id="modeBadge">连接中…</div><span class="spacer"></span><div class="pill mono muted" id="gangMc" title="GANG 市值（DexScreener，约每分钟更新）">GANG 市值 —</div><a class="bb-btn" id="latencyLink" href="latency.html" target="_blank" rel="noopener" style="text-decoration:none" title="下单耗时：每笔买卖从点击到上链花了多久，卡在哪一步"><span class="bb-ic">⏱</span>下单耗时</a><button class="bb-btn vm-btn" id="vmBtn" title="版本提示（只提示，不自动更新）">BSC Agent</button><div class="vm-pop hidden" id="vmPop"></div></footer>
+<footer class="statusbar"><a href="#" class="pill" id="selfCheckBtn" title="检查哪里没配好">🩺 自检</a><span class="chain-status"><i class="dot g"></i>BSC 主网</span>  <div class="pill"><i class="dot y"></i><span class="muted">WSS</span><b id="wssName">…</b><span class="g mono" id="wssMs"></span></div>  <div class="pill"><i class="dot g"></i><span class="muted">RPC</span><b id="rpcName">…</b><span class="g mono" id="rpcMs"></span></div>  <div class="pill mono muted" id="blockNo">#—</div>  <div class="pill mono muted" id="bnbPx">BNB —</div>  <div class="pill" id="modeBadge">连接中…</div><span class="spacer"></span><button class="bb-btn nft-float-toggle" id="nftFloatToggle" type="button" title="打开最新 NFT 面板" aria-expanded="false">✦ 最新NFT</button><button class="bb-btn vm-btn" id="vmBtn" title="版本提示（只提示，不自动更新）">BSC Agent</button><div class="vm-pop hidden" id="vmPop"></div></footer>
 
 <!-- 下单确认 -->
 <!-- 币安钱包未登录时的锁定弹窗：不能用 Esc 或点背景关闭，登录成功后自动消失 -->
@@ -264,9 +265,9 @@
 <dialog id="profitShare" class="profit-share" aria-labelledby="profitShareTitle"><div class="portfolio-dialog-head"><h2 id="profitShareTitle">分享盈亏</h2><button class="qb" data-hclose="profitShare" aria-label="关闭分享">关闭</button></div><canvas id="profitCanvas" aria-label="BSC Agent 盈亏分享图片"></canvas><div class="profit-share-actions"><label><input id="profitShowAmount" type="checkbox" checked> 显示金额</label><span id="profitShareStatus" role="status"></span><button class="qb" id="profitCopy">复制图片</button><button class="qb" id="profitSave">保存图片</button></div></dialog>
 <div class="toasts" id="toasts"></div>
 <script src="vendor/lightweight-charts.standalone.production.js?v=1792914154.2.0"></script>
-<script src="fit.js?v=1"></script>
-<script type="module" src="app.js?v=bsc-agent-54"></script>
-<script type="module" src="nft-radar.js?v=6"></script>
+<script src="fit.js?v=3"></script>
+<script type="module" src="app.js?v=bsc-agent-56"></script>
+<script type="module" src="nft-radar.js?v=12"></script>
 <script type="module" src="version.js?v=4"></script>
 </body>
 </html>

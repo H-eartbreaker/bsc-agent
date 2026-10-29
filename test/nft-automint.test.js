@@ -33,11 +33,12 @@ test('social filter modes', () => {
   assert.deepEqual([both, site, x, none].map((r) => ok('both', r)), [true, false, false, false]);
 });
 
-test('exclude keywords and scope', () => {
+test('exclude keywords; scope is always new and dry-run is always off', () => {
   assert.match(skipReason(row({ name: 'Scam Coin' }), st({ exclude: ['scam'] }), NOW), /排除/);
   const old = row({ postedAt: new Date(NOW - 7200_000).toISOString() });
-  assert.match(skipReason(old, st({ scope: 'new' }), NOW), /老项目/);
-  assert.equal(skipReason(old, st({ scope: 'all' }), NOW), null);
+  assert.match(skipReason(old, st({ scope: 'all' }), NOW), /老项目/);
+  assert.equal(cleanRules({ dry: true, scope: 'all' }).dry, false);
+  assert.equal(cleanRules({ dry: true, scope: 'all' }).scope, 'new');
 });
 
 test('retry gaps, done and noRetry', () => {
@@ -87,20 +88,23 @@ test('failure is retried only after the gap; runner crash does not lose state', 
   assert.equal(a.busy, false);
 });
 
-test('switching dry-run <-> live clears attempts; enabling resets session; restart does not auto-resume', async () => {
+test('enabling resets session and attempts; restart keeps the switch and records', async () => {
   const feed = [row({ postedAt: new Date(Date.now() + 1000).toISOString() })];
-  const { a, dir } = make(async (rows) => [{ contract: rows[0].contract, status: '可mint(未执行)' }], feed, { dry: true });
+  const { a, dir } = make(async (rows) => [{ contract: rows[0].contract, status: '成功', tx: '0xt' }], feed, {});
   a.configure({ enabled: true });
   await a.tick();
   assert.equal(a.state.attempts[feed[0].contract].done, true);
   a.configure({ enabled: false });
-  a.configure({ rules: { dry: false } });
-  assert.deepEqual(a.state.attempts, {});
   const t0 = a.state.sessionStart;
   a.configure({ enabled: true });
   assert.ok(a.state.sessionStart >= t0);
   const b = new AutoMint({ feedFile: 'x', stateFile: join(dir, 's.json'), runner: async () => [], readFeed: () => [] });
-  assert.equal(b.view().enabled, false);
+  assert.equal(b.view().enabled, true);
+  assert.equal(b.state.sessionStart, a.state.sessionStart);
+  assert.deepEqual(b.state.attempts, a.state.attempts);
+  a.configure({ enabled: false });
+  const c = new AutoMint({ feedFile: 'x', stateFile: join(dir, 's.json'), runner: async () => [], readFeed: () => [] });
+  assert.equal(c.view().enabled, false);
 });
 
 test('mintLog reads history, filters by time and summarises', () => {

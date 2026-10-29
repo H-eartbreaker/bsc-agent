@@ -485,7 +485,6 @@ function renderTop() {
   mb.title = REAL() ? `手动买卖会通过 baw 真实上链，单笔上限 ${S.baw.maxTradeBnb || '不限'} BNB；${S.baw?.automaticTrading ? '自动策略开启后会真实下单' : '当前后端自动策略仅报价'}` : LIVE() ? '真实链上行情；下单只做报价/预演，不会上链' : '所有交易都在本地模拟，不连接真实钱包';
   $('#blockNo').textContent = '#' + S.block.toLocaleString('en-US');
   $('#bnbPx').textContent = 'BNB $' + S.bnbUsd.toFixed(2);
-  $('#gangMc').textContent = 'GANG 市值 ' + (S.gangMcap > 0 ? usd(S.gangMcap) : '—');
   const w = wallet(S.activeWallet);
   if (!w.id && LIVE()) { $('#wsLabel').textContent = 'baw'; $('#wsAddr').textContent = '未连接'; $('#wsBal').textContent = S.baw?.error ? '点此查看' : ''; }
   if (w.id) {
@@ -2528,6 +2527,7 @@ var lastPulse = 0;
 function setView(v, fromRoute) {
 
   S.view = v;
+  if (!fromRoute) window.dispatchEvent(new Event('bsc:leave-nft'));
   if (v === 'hold') mountHold(false);
   $('#pulse')?.classList.toggle('hidden', v !== 'pulse');
   $('#hold')?.classList.toggle('hidden', v !== 'hold');
@@ -3363,8 +3363,7 @@ window.addEventListener('bscagent:task-state', renderTaskStatusStrip);
 setInterval(renderTaskStatusStrip, 1000);
 renderTaskStatusStrip();
 function renderPauseAll() {
-  const b = $('#pauseAll'); if (!b) return; b.classList.toggle('hidden', !LIVE());
-  const n = runningCount(); b.classList.toggle('on', n > 0);
+  const b = $('#pauseAll'); if (!b) return; const n = runningCount(); b.classList.toggle('hidden', !LIVE() || n === 0); b.classList.toggle('on', n > 0);
   b.innerHTML = n > 0 ? '<i></i>全部暂停' : '<i></i>无自动任务';
   b.title = n > 0 ? '一键暂停所有跟单并关闭狙击（不卖已买的币）' : '现在没有在跑的跟单或狙击';
 }

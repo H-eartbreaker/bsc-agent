@@ -1,4 +1,4 @@
-import { Contract, formatUnits } from 'ethers';
+import { Contract, formatUnits, parseEther } from 'ethers';
 import { CopyAuthority } from './engine/live/copyAuthority.js';
 import express from 'express';
 import { WebSocketServer } from 'ws';
@@ -30,6 +30,7 @@ import { fairPctBnb } from './engine/live/gangFair.js';
 import { mountUpdater } from './engine/updater.js';
 import { NftPortfolio } from './engine/live/nftPortfolio.js';
 import { nftFeedList, nftFeedOne, readNftFeed } from './engine/nft/feedApi.js';
+import { ArtResolver } from './engine/nft/artResolver.js';
 import { readMintHistory, summarize } from './engine/nft/mintLog.js';
 import { AutoMint, scriptRunner } from './engine/nft/autoMint.js';
 import { WatchSupervisor } from './engine/nft/watchSupervisor.js';
@@ -54,6 +55,7 @@ const nftChildEnv = () => {
   if (proxy) { env.HTTPS_PROXY ||= proxy; env.HTTP_PROXY ||= proxy; env.NODE_USE_ENV_PROXY = '1'; }
   return env;
 };
+const nftManualRunner = scriptRunner({ script: path.join(__dirname, 'scripts', 'free-mint.mjs'), cwd: __dirname, env: () => ({ ...nftChildEnv(), FREE_MINT_SOURCE: 'manual' }) });
 const nftWatcher = new WatchSupervisor({ root: __dirname, log: (m) => console.log(m) });
 // 普通用户拉作者发布的数据；作者自己（配了 Telegram 监听）本地监听，并可把数据发布给别人
 const nftSync = new FeedSync({ url: process.env.NFT_FEED_URL || DEFAULT_FEED_URL, file: NFT_FEED_FILE, log: (m) => console.log(m) });
@@ -182,6 +184,43 @@ app.get('/api/nft/mint-history', (req, res) => {
   res.json({ rows, summary: summarize(rows) });
 });
 // NFT 自动 mint 任务（免费才自动；付费永远手动）。开启后真实发送免费 mint；规则里勾「试运行」则只检查
+let nftManualBusy = false;
+// 从监听文字里读「每个 x BNB」，只当报价线索；真正的付款额以链上模拟能通过的为准
+const nftUnitWei = (row) => {
+  const m = [row.priceLine, ...(row.paidHints || [])].join(' ').match(/(\d+(?:\.\d+)?)\s*BNB/i);
+  try { return m ? parseEther(m[1]).toString() : null; } catch { return null; }
+};
+let nftQuoteBusy = false;
+app.post('/api/nft/mint/quote', async (req, res) => {
+  const row = nftFeedOne(NFT_FEED_FILE, req.body?.contract), qty = Number(req.body?.qty);
+  if (!row) return res.status(404).json({ error: '监听列表里没有这个项目' });
+  if (!Number.isInteger(qty) || qty < 1 || qty > 50) return res.status(400).json({ error: '数量要是 1~50 的整数' });
+  if (nftQuoteBusy) return res.status(409).json({ error: '正在报价，稍等几秒' });
+  nftQuoteBusy = true;
+  try {
+    const [r] = await nftManualRunner([row], { dry: true, quote: true, maxQty: qty, qty, unitWei: nftUnitWei(row) });
+    if (r.status !== '报价') return res.status(422).json({ error: String(r.reason || '报价失败').split('；')[0].slice(0, 200) });
+    res.json({ quote: { name: row.name, qty: r.qty, valueWei: r.valueWei, valueBnb: r.valueBnb, gasBnb: r.gasBnbEst, balanceBnb: r.balanceBnb, free: r.valueWei === '0' } });
+  } catch (e) { res.status(500).json({ error: String(e.message || e).slice(0, 240) }); }
+  finally { nftQuoteBusy = false; }
+});
+app.post('/api/nft/mint', async (req, res) => {
+  if (!(LIVE && LIVE_TRADE)) return res.status(400).json({ error: '当前是只看不下单模式（LIVE_TRADE=0），不能真实 mint' });
+  const row = nftFeedOne(NFT_FEED_FILE, req.body?.contract);
+  const qty = Number(req.body?.qty);
+  if (!row) return res.status(404).json({ error: '监听列表里没有这个项目' });
+  const valueWei = String(req.body?.valueWei ?? '');
+  const paid = !row.free && req.body?.confirmed === true;
+  if (!row.free && !(paid && /^\d+$/.test(valueWei))) return res.status(400).json({ error: '付费项目要先报价并二次确认金额' });
+  if (!Number.isInteger(qty) || qty < 1 || qty > 50) return res.status(400).json({ error: '数量要是 1~50 的整数' });
+  if (nftManualBusy || nftAuto.busy) return res.status(409).json({ error: '另一笔 mint 正在进行，稍等几秒再试' });
+  nftManualBusy = true;
+  try {
+    const [r] = await nftManualRunner([row], { dry: false, maxQty: qty, qty, valueWei: paid ? valueWei : undefined });
+    res.json({ result: r });
+  } catch (e) { res.status(500).json({ error: String(e.message || e).slice(0, 240) }); }
+  finally { nftManualBusy = false; }
+});
 app.get('/api/nft/auto', (req, res) => res.json({ ...nftAuto.view(), canExecute: LIVE && LIVE_TRADE, watcher: nftWatcher.status(), source: nftWatcher.configured() ? 'watch' : 'sync', feed: nftSync.status(), publisher: nftPublisher.status() }));
 app.post('/api/nft/auto', (req, res) => {
   const b = req.body || {};
@@ -571,6 +610,43 @@ setInterval(() => {
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 8);
   for (const t of todo) { prewarmTries.set(t.image, (prewarmTries.get(t.image) || 0) + 1); ensureImg(t.image).catch(() => {}); }
 }, 3000);
+// NFT 头像：Telegram 消息里没有图，按合约读 contractURI/tokenURI 里的 image，再走上面的图片缓存。
+async function jsonFetch(u) {
+  const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 8000);
+  try {
+    let r;
+    for (let i = 0; i <= 3; i++) {
+      if (!isPublicImageUrl(u)) throw new Error('url not allowed');
+      r = await httpsGet(u, ac.signal);
+      if (![301, 302, 303, 307, 308].includes(r.statusCode)) break;
+      r.destroy(); if (i === 3 || !r.headers.location) throw new Error('redirect'); u = new URL(r.headers.location, u).href;
+    }
+    if (r.statusCode < 200 || r.statusCode >= 300) { r.destroy(); throw new Error('http ' + r.statusCode); }
+    const chunks = []; let size = 0;
+    for await (const ch of r) { size += ch.length; if (size > 5e5) { r.destroy(); throw new Error('too big'); } chunks.push(ch); }
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } finally { clearTimeout(tm); }
+}
+const nftArt = new ArtResolver({ provider: market.provider, fetchJson: jsonFetch, file: path.join(__dirname, 'data', 'nft-art.json') });
+app.get('/api/nft/art/:contract', async (req, res) => {
+  const miss = () => res.status(404).set('Cache-Control', 'public, max-age=300').end();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(req.params.contract)) return res.status(400).end();
+  try {
+    const image = await nftArt.resolve(req.params.contract);
+    if (!image) return miss();
+    if (image.startsWith('data:image/')) {
+      const m = image.match(/^data:(image\/[a-z+.-]+)(;base64)?,(.*)$/is);
+      if (!m || !Object.hasOwn(EXT, m[1].toLowerCase())) return miss();
+      const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]));
+      if (buf.length > 2e6) return miss();
+      return res.set({ 'Content-Type': m[1], 'Cache-Control': 'public, max-age=86400', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox", 'X-Content-Type-Options': 'nosniff' }).send(buf);
+    }
+    if (!isPublicImageUrl(image)) return miss();
+    const m = await ensureImg(image);
+    res.set({ 'Content-Type': m.ct, 'Cache-Control': 'public, max-age=86400', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox", 'X-Content-Type-Options': 'nosniff' });
+    res.sendFile(path.join(IMG_DIR, m.file));
+  } catch { miss(); }
+});
 app.get('/api/names', (req, res) => {
   const n = market.names; if (!n) return res.json({ ver: 0, names: {} });
   if (Number(req.query.ver) === n.ver) return res.json({ ver: n.ver });

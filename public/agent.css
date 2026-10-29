@@ -1386,7 +1386,7 @@ body { min-width: 1220px; overflow-x: auto; overflow-y: hidden; }
 .brand-t { font-size: 22px; }
 .viewsw { gap: 24px; }
 .viewsw button { font-size: 14px; }
-.topbar > .search { position: static; transform: none; width: 380px; flex: 0 0 380px; max-width: none; margin-left: auto; }
+.topbar > .search { position: static; transform: none; width: auto; flex: 1 1 380px; min-width: 300px; max-width: none; margin-left: 0; }
 .header-wallet { min-width: max-content; }
 .layout { display: grid; height: calc(100dvh - var(--headerH) - var(--footerH) - var(--favH, 0px)); grid-template-columns: var(--leftW) minmax(0, 1fr) clamp(300px, 24vw, 360px); }
 .left { max-height: none; }
@@ -1400,7 +1400,7 @@ body { min-width: 1220px; overflow-x: auto; overflow-y: hidden; }
 .nft-project-title b { font-size: 16px; }
 .nft-project-price, .nft-project-meta { font-size: 12px; }
 .nft-detail { display: none; }
-.nft-float-toggle { position: fixed; right: 18px; bottom: 18px; z-index: 130; height: 42px; padding: 0 16px; border-color: var(--line2); background: #0b171b; box-shadow: 0 10px 28px rgba(0,0,0,.38); font-size: 13px; }
+.nft-float-toggle { cursor: pointer; }
 .nft-float-toggle.active { color: var(--g); border-color: var(--g); background: var(--g-bg); }
 .task-status-strip { display: flex; align-items: center; gap: 5px; flex: none; }
 .task-status-strip button { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--muted); font-size: 11px; white-space: nowrap; }
@@ -1434,7 +1434,7 @@ body { min-width: 1220px; overflow-x: auto; overflow-y: hidden; }
 .nft-history-row .good { color: var(--g); }
 .nft-history-row .bad { color: var(--r); }
 .nft-history-reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nft-float-panel { position: fixed; z-index: 120; top: var(--headerH); right: 0; bottom: 0; width: 420px; height: auto; overflow: auto; padding: 14px; border: 1px solid var(--line2); border-right: 0; border-bottom: 0; border-radius: 12px 0 0 0; background: var(--panel); box-shadow: -12px 0 32px rgba(0,0,0,.28); }
+.nft-float-panel { position: fixed; z-index: 120; top: var(--headerH); right: 0; bottom: var(--footerH, 32px); width: 420px; height: auto; overflow: auto; padding: 14px; border: 1px solid var(--line2); border-right: 0; border-bottom: 0; border-radius: 12px 0 0 0; background: var(--panel); box-shadow: -12px 0 32px rgba(0,0,0,.28); }
 .nft-float-panel.left { left: 0; right: auto; border-left: 0; border-right: 1px solid var(--line2); border-radius: 0 12px 0 0; box-shadow: 12px 0 32px rgba(0,0,0,.28); }
 .nft-float-panel.hidden { display: none; }
 .nft-float-panel .nft-new-list { max-height: none; }
@@ -1460,3 +1460,95 @@ html.fit .nft-new-list { max-height: calc(var(--vp-h) - 230px); }
 #hold .hold-tot { align-items: stretch; }
 #hold .hold-stat > b > span, #hold .hold-stat > b > small { display: inline; }
 #hold .hold-stat { min-width: 152px; min-height: 0; align-self: flex-start; }
+
+/* 战壕标签（仅窄屏显示）：新创建 / 即将打满 / 已开盘 三栏切换。 */
+.pulse-tabs { display: none; }
+html.narrow, html.narrow body { min-width: 0; overflow-x: hidden; }
+html.narrow { --headerH: 120px; }
+html.narrow .topbar { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 44px 36px 40px; align-items: center; gap: 0 10px; padding: 0 12px; box-sizing: border-box; height: var(--headerH); }
+html.narrow .topbar .brand { grid-column: 1; grid-row: 1; min-width: 0; }
+html.narrow .brand-t { font-size: 17px; }
+html.narrow .header-wallet { grid-column: 2; grid-row: 1; justify-self: end; min-width: 0; max-width: 100%; }
+html.narrow .header-wallet .fav-tg, html.narrow .header-wallet .gh-btn, html.narrow .header-wallet .authpill, html.narrow .task-status-strip { display: none; }
+html.narrow .wallet-sel { min-width: 0; max-width: 56vw; }
+html.narrow .wallet-sel #wsAddr { display: none; }
+html.narrow .wallet-sel #wsHandle { max-width: 90px; }
+html.narrow .topbar .viewsw { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; gap: 18px; height: 36px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+html.narrow .topbar .viewsw::-webkit-scrollbar { display: none; }
+html.narrow .topbar > .search { grid-column: 1 / -1; grid-row: 3; width: 100%; min-width: 0; height: 34px; flex: none; }
+html.narrow .search kbd { display: none; }
+html.narrow .pulse.trench:not(.hidden) { display: flex; flex-direction: column; padding: 0; height: calc(100dvh - var(--headerH) - var(--footerH) - var(--favH, 0px)); overflow: hidden; }
+html.narrow .pulse-tools { display: none; }
+html.narrow .pulse-tabs { display: flex; flex: none; border-bottom: 1px solid var(--line); background: var(--panel); }
+html.narrow .pulse-tabs button { flex: 1; height: 40px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: 14px; }
+html.narrow .pulse-tabs button.active { color: var(--g); border-bottom-color: var(--g); font-weight: 600; }
+html.narrow #pulse .tcol { display: none; flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0; border-right: 0; }
+html.narrow #pulse[data-pt="new"] #tc-new, html.narrow #pulse[data-pt="soon"] #tc-soon, html.narrow #pulse[data-pt="dex"] #tc-dex { display: flex; }
+html.narrow #pulse .tcb { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* ===== 窄窗口（< 900px）：所有页面改成单列 + 分页签，不再整体缩放 ===== */
+.trade-tabs { display: none; }
+html.narrow .trade-tabs { display: flex; flex: none; border-bottom: 1px solid var(--line); background: var(--panel); }
+html.narrow .trade-tabs button { flex: 1; height: 40px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: 14px; }
+html.narrow .trade-tabs button.active { color: var(--g); border-bottom-color: var(--g); font-weight: 600; }
+html.narrow .layout { display: flex; flex-direction: column; min-width: 0; height: calc(100dvh - var(--headerH) - var(--footerH) - var(--favH, 0px)); overflow: hidden; }
+html.narrow .splitter, html.narrow .vsplit { display: none; }
+html.narrow .layout > .left, html.narrow .layout > .center, html.narrow .layout > .right { display: none; flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0; max-height: none; border: 0; box-sizing: border-box; overflow-y: auto; }
+html.narrow .layout[data-tv="list"] > .left, html.narrow .layout[data-tv="chart"] > .center, html.narrow .layout[data-tv="trade"] > .right { display: flex; flex-direction: column; }
+html.narrow .right { padding: 14px 14px 24px; }
+html.narrow .center { overflow-y: auto; }
+html.narrow .thead, html.narrow #tokenHead.thead { padding: 12px 14px; }
+html.narrow #tokenHead .asset-stats { width: 100%; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; }
+html.narrow .chartrow, html.narrow .chartbox { min-height: 340px; height: 340px; flex: none; }
+html.narrow #actBox { position: static; width: auto; flex-basis: auto; }
+html.narrow .show-activity .chartrow { flex-direction: column; height: auto; }
+html.narrow .show-activity #actBox { max-height: 240px; border-left: 0; border-top: 1px solid var(--line); }
+html.narrow .center .bottom { height: auto; min-height: 220px; max-height: none; flex: none; overflow-x: auto; }
+html.narrow .ctool { flex-wrap: wrap; row-gap: 4px; }
+html.narrow .market-tools, html.narrow .tabs, html.narrow .seg.plat { min-width: 0; }
+
+html.narrow #hold:not(.in-bottom) { min-width: 0; padding: 10px 12px 24px; height: calc(100dvh - var(--headerH) - var(--footerH) - var(--favH, 0px)); overflow-y: auto; box-sizing: border-box; }
+html.narrow #hold .hold-toolbar { gap: 6px; }
+html.narrow #hold .hold-tabs { flex-wrap: wrap; }
+html.narrow #hold .hold-tot { flex-wrap: wrap; gap: 8px; }
+html.narrow #hold .hold-stat { min-width: 0; flex: 1 1 140px; }
+html.narrow #holdBody, html.narrow #holdCalendar, html.narrow #holdNfts { overflow-x: auto; }
+html.narrow #holdBody table { min-width: 560px; }
+
+html.narrow #track, html.narrow #snipe { min-width: 0; height: calc(100dvh - var(--headerH) - var(--footerH) - var(--favH, 0px)); overflow-y: auto; }
+html.narrow #track > .track-head, html.narrow #track > #trackSummary, html.narrow #track > .track-section-tabs, html.narrow #track > .track-grid, html.narrow #track > .copy-panel, html.narrow #snipe > .snp { width: calc(100% - 24px); }
+html.narrow #track > .track-grid { grid-template-columns: minmax(0, 1fr); }
+html.narrow #track > .track-head { flex-wrap: wrap; height: auto; padding: 8px 0; gap: 6px; }
+html.narrow #track .track-main, html.narrow #track .copy-panel, html.narrow #snipe .snp { overflow-x: auto; }
+html.narrow #track .trk-tbl, html.narrow #snipe .trk-tbl { min-width: 560px; }
+
+html.narrow .nft-workspace { min-width: 0; height: calc(100dvh - var(--headerH) - var(--footerH) - var(--favH, 0px)); padding: 12px 12px 24px; }
+html.narrow .nft-toolbar { flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+html.narrow .nft-project-grid { grid-template-columns: minmax(0, 1fr); }
+html.narrow .nft-project-card { min-height: 0; padding: 12px; }
+html.narrow .nft-subnav { overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+html.narrow .nft-filterbar .spacer { display: none; }
+html.narrow .nft-manager-grid { grid-template-columns: minmax(0, 1fr); }
+html.narrow .nft-setting-row { flex-wrap: wrap; }
+html.narrow .nft-history-table { overflow-x: auto; }
+html.narrow .nft-history-row { min-width: 720px; }
+html.narrow .nft-float-panel { width: 100vw; border-radius: 0; }
+html.narrow .hold-exchange, html.narrow .profit-share { width: calc(100vw - 24px); }
+
+.nft-badge.done { color: #06110e; background: var(--g); border-color: var(--g); font-weight: 700; }
+.nft-project-card:has(.nft-badge.done), .nft-new-item:has(.nft-badge.done) { border-color: color-mix(in srgb, var(--g) 45%, var(--line)); }
+
+/* 最新NFT浮窗展开时，把页面内容往里挤，不再盖住图表和按钮（顶栏、底栏保持整宽） */
+html { --nftDock: 420px; }
+html.nft-docked-right:not(.narrow) body { padding-right: var(--nftDock); }
+html.nft-docked-left:not(.narrow) body { padding-left: var(--nftDock); }
+html.nft-docked-right:not(.narrow) .topbar, html.nft-docked-right:not(.narrow) .statusbar { margin-right: calc(-1 * var(--nftDock)); }
+html.nft-docked-left:not(.narrow) .topbar, html.nft-docked-left:not(.narrow) .statusbar { margin-left: calc(-1 * var(--nftDock)); }
+.nft-project-art { position: relative; overflow: hidden; }
+.nft-project-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #0b171b; }
+.nft-manual-mint { margin: 4px 0 12px; }
+.nft-manual-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nft-manual-or { color: var(--muted, #8a9a9f); font-size: 12px; }
+.nft-manual-qty { width: 72px; height: 34px; padding: 0 8px; border: 1px solid var(--line2); border-radius: 8px; background: var(--bg); color: inherit; font: inherit; }
+.nft-manual-msg.bad { color: var(--r, #e5484d); }
+.nft-manual-mint button[disabled] { opacity: .5; cursor: wait; }
