@@ -267,19 +267,21 @@ async function loadMine() {
 const fmtFloor = (m) => m.status === 'none' ? '暂无市场' : m.floor == null ? (m.status === 'ok' ? '无挂单' : '—') : `${+m.floor.toFixed(4)} ${esc(m.symbol || '')}`;
 const alertText = (a) => [a.reason !== 'volume' ? `地板价 ${+a.floor.toFixed(4)} ${a.symbol}` : '', a.reason !== 'floor' && a.volume24h != null ? `24h 成交量 ${+a.volume24h.toFixed(3)} BNB` : ''].filter(Boolean).join('，');
 const fmtVol = (v, n) => v == null ? '—' : `${+v.toFixed(3)} BNB${n != null ? `<small>${n} 笔</small>` : ''}`;
+const hideEmpty = () => localStorage.getItem('bscagent.nftHideEmpty') !== '0';
+const isEmptyMarket = (m) => (m.status === 'ok' || m.status === 'none') && m.floor == null && !(m.volume24h > 0) && !m.alert;
 function mineMarkup() {
   const d = R.mine; if (!d) return '<div class="empty">读取中…</div>';
   const note = d.error ? `<div class="nft-mine-note">${esc(d.error)}</div>` : '';
-  const rows = d.rows || [];
+  const all = d.rows || [], hide = hideEmpty(), hidden = hide ? all.filter(isEmptyMarket).length : 0, rows = hide ? all.filter((m) => !isEmptyMarket(m)) : all;
   const body = rows.length ? rows.map((m) => {
     const link = m.status === 'ok' ? `<a href="https://web3.okx.com/zh-hans/nft/collection/bsc/${encodeURIComponent(m.contract)}" target="_blank" rel="noopener noreferrer">OKX</a>` : '';
     const al = m.alert ? `<span class="nft-mine-hot">${esc(alertText(m.alert))}</span> <button data-nft-ack="${esc(m.contract)}">已读</button>` : '';
     return `<div class="nft-mine-row${m.alert ? ' hot' : ''}"><span><b>${esc(m.name || m.contract.slice(0, 10))}</b><small>${esc(m.contract)}</small></span><span>${m.count}</span><span>${fmtFloor(m)}</span><span>${fmtVol(m.volume24h, m.trades24h)}</span><span>${fmtVol(m.volume)}</span><span>${m.owners ?? '—'}</span><span>${al}${link}</span></div>`;
-  }).join('') : '<div class="empty">还没有 mint 到的 NFT</div>';
-  const strip = (d.alerts || []).map((a) => { const m = rows.find((r) => r.contract === a.contract); return `<div class="nft-mine-strip"><b>${esc(m?.name || a.contract.slice(0, 10))}</b><span>${esc(alertText(a))}</span><button data-nft-ack="${esc(a.contract)}">已读</button></div>`; }).join('');
+  }).join('') : (all.length ? '<div class="empty">没有符合条件的项目，关掉上面的「隐藏」可以看全部</div>' : '<div class="empty">还没有 mint 到的 NFT</div>');
+  const strip = (d.alerts || []).map((a) => { const m = all.find((r) => r.contract === a.contract); return `<div class="nft-mine-strip"><b>${esc(m?.name || a.contract.slice(0, 10))}</b><span>${esc(alertText(a))}</span><button data-nft-ack="${esc(a.contract)}">已读</button></div>`; }).join('');
   const when = d.checkedAt ? '上次查询 ' + fmtT(d.checkedAt) : '尚未查询';
   const intervals = [5, 10, 15, 30, 60, 180, 360, 1440].map((n) => `<option value="${n}"${n === d.intervalMin ? ' selected' : ''}>${n >= 60 ? n / 60 + ' 小时' : n + ' 分钟'}</option>`).join('');
-  return `<div class="nft-manager-head"><div><h2>我的 NFT</h2><p>${when}${d.partial ? ' · 持仓读取不完整' : ''} · 价格来自 OKX NFT 市场，只读，不会动你的钱包</p></div><div class="nft-history-tools"><button class="nft-action" data-nft-market-refresh>${d.running ? '查询中…' : '刷新价格'}</button></div></div>${note}${strip}
+  return `<div class="nft-manager-head"><div><h2>我的 NFT</h2><p>${when}${d.partial ? ' · 持仓读取不完整' : ''} · 价格来自 OKX NFT 市场，只读，不会动你的钱包</p></div><div class="nft-history-tools"><label class="tgl nft-mine-tgl"><input type="checkbox" data-nft-hide-empty ${hide ? 'checked' : ''}><i></i><span>隐藏无挂单且无成交的${hidden ? `<small>已隐藏 ${hidden} 个</small>` : ''}</span></label><button class="nft-action" data-nft-market-refresh>${d.running ? '查询中…' : '刷新价格'}</button></div></div>${note}${strip}
   <div class="nft-settings-card nft-mine-settings"><h3>涨价 / 成交提醒</h3>
     <label class="nft-setting-row"><span>地板价涨到<small>达到后提醒我</small></span><span class="nft-unit"><input type="number" min="0" step="0.01" value="${d.minFloor}" data-nft-minfloor><i>BNB</i></span></label>
     <label class="nft-setting-row"><span>24 小时成交量达到<small>填 0 表示不按成交量提醒</small></span><span class="nft-unit"><input type="number" min="0" step="0.1" value="${d.minVolume24h ?? 1}" data-nft-minvol><i>BNB</i></span></label>
@@ -345,6 +347,7 @@ document.addEventListener('click', async (e) => {
   const copy = e.target.closest('[data-nft-copy]');
   if (copy) { try { await navigator.clipboard.writeText(copy.dataset.nftCopy); copy.textContent = '已复制'; } catch { copy.textContent = '复制失败'; } setTimeout(() => { copy.textContent = '复制'; }, 1200); }
 }, true);
+document.addEventListener('change', (e) => { const t = e.target.closest?.('[data-nft-hide-empty]'); if (!t) return; try { localStorage.setItem('bscagent.nftHideEmpty', t.checked ? '1' : '0'); } catch { /* 存不了就只在本次有效 */ } R.mineAt = 0; t.blur(); render(); });
 document.addEventListener('input', (e) => { const q = e.target.closest?.('[data-nft-mint-qty]'); if (q) R.mintQty = Number(q.value) || 2; });
 $('#nftRefresh')?.addEventListener('click', () => load());
 $('#nftSort')?.addEventListener('change', (e) => { R.sort = e.target.value; render(); });

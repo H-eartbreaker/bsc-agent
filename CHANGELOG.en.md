@@ -4,6 +4,10 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.4.1
+**NFT**
+- "My NFTs" has a new switch, "Hide projects with no listings and no volume" (on by default, remembered): projects with no listings and zero 24h volume no longer fill the list, and the number hidden is shown next to it. Projects with an alert, or whose price could not be read, are never hidden.
+
 ## 0.4.0
 **NFT**
 - New "My NFTs" tab: lists every project you minted with holdings, floor price, 24h volume (with trade count), total volume and owner count, plus a link to the OKX page. Prices are read from OKX NFT marketplace's public pages: **no API key needed, read-only, never touches your wallet**.

@@ -1601,3 +1601,6 @@ html.narrow .nft-float-panel.min { width: auto; max-width: none; border-radius: 
 .nft-mine-strip button { min-height: 28px; padding: 0 14px; border: 1px solid var(--g); border-radius: 6px; color: var(--g); font-size: 12px; }
 .nft-mine-table { margin-top: 14px; }
 .nft-mine-row button { min-height: 26px; padding: 0 10px; border: 1px solid var(--g); border-radius: 6px; color: var(--g); font-size: 11px; }
+.nft-mine-tgl { margin-right: 6px; color: var(--muted); }
+.nft-mine-tgl small { display: block; margin-top: 2px; color: var(--dim); font-size: 11px; }
+.nft-manager-head .nft-history-tools { align-items: center; gap: 14px; }
