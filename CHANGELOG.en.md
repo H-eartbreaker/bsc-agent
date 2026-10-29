@@ -4,6 +4,11 @@
 
 > The version number lives in `package.json`. When a newer version exists, the GitHub icon in the top-right shows a red dot and a pop-up.
 
+## 0.4.3
+**NFT**
+- Free mints now work in batches: when a contract only allows 1 per call (but several per wallet), the tool no longer stops after one transaction. It repeats one call at a time until the wallet cap or your target is reached; a manual quantity above the per-call limit is split the same way. Every call is still simulated and previewed first, and any failure stops the batch.
+- Fixed occasional 403 errors on manual mints: chain reads now rotate across several RPC providers instead of relying only on Binance's public nodes.
+
 ## 0.4.2
 **NFT**
 - Fixed missing NFT avatars: project-hosted metadata / image domains are often unreachable directly, so when a proxy is set they are now fetched through it first, then directly.

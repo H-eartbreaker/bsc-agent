@@ -118,7 +118,7 @@ export class AutoMint {
       for (const p of picks) {
         const r = results.find((x) => String(x.contract || '').toLowerCase() === p.contract) || { status: '失败', reason: '没有拿到结果' };
         const a = this.state.attempts[p.contract];
-        a.status = r.status; a.reason = r.reason || ''; a.tx = r.tx || ''; a.lastAt = Date.now();
+        a.status = r.status; a.reason = r.reason || r.batchNote || ''; a.tx = r.tx || ''; a.lastAt = Date.now();
         a.done = r.status === '成功' || !!r.tx || (rules.dry && r.status === '可mint(未执行)');   // 已广播过交易：绝不重发，避免重复 mint
         a.noRetry = !a.done && NO_RETRY.test(r.reason || '');
       }
